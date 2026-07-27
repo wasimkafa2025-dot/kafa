@@ -3,6 +3,7 @@ import { Task, Activity, BackupSnapshot, AppSettings } from './types';
 import { getActiveDb, getActiveDbMode, getFirebaseInstance } from './lib/firebase';
 import { callGeminiProxy } from './lib/gemini';
 import { sendTelegramMessage, escapeTelegramHtml } from './lib/telegram';
+import { getLocalDateStr, getMonthNameFromDateStr } from './lib/dateUtils';
 import { TaskCard } from './components/TaskCard';
 import { TaskForm } from './components/TaskForm';
 import { CalendarView } from './components/CalendarView';
@@ -500,20 +501,18 @@ export default function App() {
 
   // --- FIRESTORE SYNCHRONIZATION POOL ---
   useEffect(() => {
-    if (!currentUser) return;
-
     hasAttemptedOfflineSync.current = false;
 
     // Connect to Firestore collection dynamically
     const db = getActiveDb();
     setDbMode(getActiveDbMode());
 
-    // Query tasks specifically for current logged-in userId
-    const qTasks = query(collection(db, "tasks"), where("userId", "==", currentUser));
+    // Listen to tasks collection in active Firestore database
+    const tasksColl = collection(db, "tasks");
     
     logActivity(`Connected with Cloud Firestore [${getActiveDbMode() === 'user' ? 'custom project' : 'workspace project'}]`);
 
-    const unsubscribe = onSnapshot(qTasks, (snapshot) => {
+    const unsubscribe = onSnapshot(tasksColl, (snapshot) => {
       const isResetActive = localStorage.getItem('taskflow_reset_active') === 'true';
       if (isResetActive) {
         setTasks([]);
@@ -542,14 +541,14 @@ export default function App() {
         if (!hasAttemptedOfflineSync.current) {
           hasAttemptedOfflineSync.current = true;
           // Pre-load from local storage or wait
-          const localTasks = localStorage.getItem(`taskflow_tasks_${currentUser}`);
+          const localTasks = localStorage.getItem(`taskflow_tasks_${currentUser || 'Kafa'}`);
           if (localTasks) {
             try {
               const parsed = JSON.parse(localTasks);
               setTasks(parsed);
               // Write them back to cloud to synchronize
               parsed.forEach((t: Task) => {
-                setDoc(doc(db, "tasks", t.id), { ...t, userId: currentUser }).catch(() => {});
+                setDoc(doc(db, "tasks", t.id), { ...t, userId: currentUser || 'Kafa' }).catch(() => {});
               });
               return;
             } catch (_) {}
@@ -562,12 +561,12 @@ export default function App() {
       setTasks(activeList);
       setArchivedTasks(archivedList);
 
-      localStorage.setItem(`taskflow_tasks_${currentUser}`, JSON.stringify(activeList));
+      localStorage.setItem(`taskflow_tasks_${currentUser || 'Kafa'}`, JSON.stringify(activeList));
       triggerAutoBackup(activeList, archivedList);
     }, (error) => {
       console.warn("Firestore listener failed, using offline fallback:", error);
       // Fallback seamlessly to localstorage
-      const localTasks = localStorage.getItem(`taskflow_tasks_${currentUser}`);
+      const localTasks = localStorage.getItem(`taskflow_tasks_${currentUser || 'Kafa'}`);
       if (localTasks) {
         try {
           setTasks(JSON.parse(localTasks));
@@ -617,7 +616,7 @@ export default function App() {
       // 2. Automated Telegram alerts before one day (Exactly 24 hours / 1 day)
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
-      const tomorrowStr = tomorrow.toISOString().split('T')[0];
+      const tomorrowStr = getLocalDateStr(tomorrow);
 
       for (const t of currentTasks) {
         if ((t.status === 'Pending' || t.status === 'Completed') && t.date === tomorrowStr && !t.telegramNotified) {
@@ -1069,7 +1068,7 @@ export default function App() {
 
   // --- RECALCULATE GLOBAL PRODUCTIVITY WEIGHTS ---
   const calculateStats = () => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateStr();
     const todayList = tasks.filter(t => t.date === todayStr);
     const todayCompleted = todayList.filter(t => t.status === 'Completed').length;
     const todayPending = todayList.filter(t => t.status === 'Pending').length;
@@ -1077,7 +1076,12 @@ export default function App() {
     const currentMonthNum = new Date().getMonth();
     const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     const currentMonthName = months[currentMonthNum];
-    const monthlyList = tasks.filter(t => t.type === 'monthly' && t.month === currentMonthName);
+    const monthlyList = tasks.filter(t => 
+      t.type === 'monthly' && (
+        t.month === currentMonthName || 
+        (t.date && getMonthNameFromDateStr(t.date) === currentMonthName)
+      )
+    );
 
     const yearlyList = tasks.filter(t => t.type === 'yearly');
 

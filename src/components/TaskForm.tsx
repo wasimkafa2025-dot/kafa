@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Task } from '../types';
 import { callGeminiProxy } from '../lib/gemini';
+import { getLocalDateStr, getMonthNameFromDateStr } from '../lib/dateUtils';
 import { Sparkles, Calendar, Clock, Tag, ArrowRight, Save, RotateCcw, Mic, MicOff, CalendarDays, CalendarRange, RefreshCw } from 'lucide-react';
 
 interface TaskFormProps {
@@ -170,7 +171,7 @@ export const TaskForm: React.FC<TaskFormProps> = ({
       setStatus('Pending');
       setTags('');
       setMonth('October');
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = getLocalDateStr();
       setDate(todayStr);
       setTime('12:00');
       setSelectedType(type);
@@ -194,7 +195,7 @@ export const TaskForm: React.FC<TaskFormProps> = ({
     } else {
       data.date = date;
       data.time = time;
-      data.month = new Date(date).toLocaleString('default', { month: 'long' });
+      data.month = getMonthNameFromDateStr(date);
     }
 
     onSubmit(data, selectedType);
@@ -204,7 +205,7 @@ export const TaskForm: React.FC<TaskFormProps> = ({
     if (!aiInput.trim()) return;
     setLoading(true);
     try {
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = getLocalDateStr();
       const todayWeekday = new Date().toLocaleDateString('en-US', { weekday: 'long' });
 
       const schema = {
