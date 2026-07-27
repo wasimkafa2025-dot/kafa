@@ -840,6 +840,38 @@ export default function App() {
       logActivity(`Offline write for task: "${taskData.task}"`);
     }
 
+    // Trigger immediate Telegram notification for new task
+    const isKhmer = /[\u1780-\u17FF]/.test(newTask.task);
+    const priorityEmoji = newTask.priority === 'High' ? '🔴' : newTask.priority === 'Medium' ? '🟡' : '🟢';
+    const safeTitle = escapeTelegramHtml(newTask.task);
+    let messageText = '';
+    if (isKhmer) {
+      const priorityKh = newTask.priority === 'High' ? 'បន្ទាន់' : newTask.priority === 'Medium' ? 'មធ្យម' : 'មិនសូវបន្ទាន់';
+      messageText = `<b>📌 កិច្ចការថ្មីត្រូវបានបង្កើត</b>\n\n` +
+                    `សួស្តីលោក កាហ្វា, កិច្ចការថ្មីមួយត្រូវបានកត់ត្រាទុក៖\n\n` +
+                    `📋 <b>ប្រធានបទ៖</b> <i>${safeTitle}</i>\n` +
+                    `📅 <b>ថ្ងៃ ខែ ឆ្នាំ៖</b> <code>${newTask.date || '--'}</code>\n` +
+                    `🕒 <b>ពេលវេលា៖</b> <code>${newTask.time || '--:--'}</code>\n` +
+                    `⚡ <b>អាទិភាព៖</b> ${priorityEmoji} <b>${priorityKh}</b>\n\n` +
+                    `សូមអរគុណ!`;
+    } else {
+      messageText = `<b>📌 New Task Created</b>\n\n` +
+                    `Hello Mr. Kafa, a new task has been recorded:\n\n` +
+                    `📋 <b>Title:</b> <i>${safeTitle}</i>\n` +
+                    `📅 <b>Date:</b> <code>${newTask.date || '--'}</code>\n` +
+                    `🕒 <b>Time:</b> <code>${newTask.time || '--:--'}</code>\n` +
+                    `⚡ <b>Priority:</b> ${priorityEmoji} <b>${newTask.priority}</b>\n\n` +
+                    `Thank you!`;
+    }
+
+    sendTelegramMessage(messageText, `created_${newTask.id}`).then((success) => {
+      if (success) {
+        logActivity(`Sent creation Telegram alert for: "${newTask.task}"`);
+      }
+    }).catch((err) => {
+      console.error("Error sending creation Telegram message:", err);
+    });
+
     setQuickAddModal({ open: false, type: 'daily' });
   };
 

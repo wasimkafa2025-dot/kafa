@@ -27,15 +27,7 @@ export const WORKSPACE_FIREBASE_CONFIG = {
 };
 
 // The custom database configuration explicitly provided by the user
-export const USER_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyBxmhx7wRReWw5x7UfLO1n3OK9JfAMnsTw",
-  authDomain: "recruitmen-2cc3d.firebaseapp.com",
-  projectId: "recruitmen-2cc3d",
-  storageBucket: "recruitmen-2cc3d.firebasestorage.app",
-  messagingSenderId: "664767825491",
-  appId: "1:664767825491:web:1dab8315c72225f85828a6",
-  measurementId: "G-DW30NNVLVK"
-};
+export const USER_FIREBASE_CONFIG = WORKSPACE_FIREBASE_CONFIG;
 
 let activeApp: FirebaseApp | null = null;
 let activeDb: Firestore | null = null;
@@ -92,11 +84,8 @@ function tryInitializeAnalytics(app: FirebaseApp) {
 
 const WORKSPACE_DB_ID = "ai-studio-40322e71-9f6e-4f6d-8979-34628b9aa6af";
 
-function createDbInstance(app: FirebaseApp, mode: "user" | "workspace"): Firestore {
-  if (mode === "workspace") {
-    return getFirestore(app, WORKSPACE_DB_ID);
-  }
-  return getFirestore(app);
+function createDbInstance(app: FirebaseApp, _mode: "user" | "workspace"): Firestore {
+  return getFirestore(app, WORKSPACE_DB_ID);
 }
 
 export function getFirebaseInstance(mode: "user" | "workspace" = "user"): { app: FirebaseApp; db: Firestore } {
@@ -136,12 +125,12 @@ export function getFirebaseInstance(mode: "user" | "workspace" = "user"): { app:
 
 // Default helper to get active database based on saved preferences
 export function getActiveDb(): Firestore {
-  const savedMode = (localStorage.getItem("taskflow_db_mode") as "user" | "workspace") || "user";
+  const savedMode = (localStorage.getItem("taskflow_db_mode") as "user" | "workspace") || "workspace";
   return getFirebaseInstance(savedMode).db;
 }
 
 export function getActiveDbMode(): "user" | "workspace" {
-  return (localStorage.getItem("taskflow_db_mode") as "user" | "workspace") || "user";
+  return (localStorage.getItem("taskflow_db_mode") as "user" | "workspace") || "workspace";
 }
 
 export function setActiveDbMode(mode: "user" | "workspace") {
