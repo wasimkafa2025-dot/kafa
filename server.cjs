@@ -55,7 +55,7 @@ async function startServer() {
         }, 60 * 60 * 1e3);
       }
       const telegramUrl = `https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`;
-      const response = await fetch(telegramUrl, {
+      let response = await fetch(telegramUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -66,7 +66,20 @@ async function startServer() {
       });
       if (!response.ok) {
         const errorText = await response.text();
-        console.error("Telegram API response failed:", errorText);
+        console.warn("Express Telegram HTML attempt failed, retrying plain text fallback:", errorText);
+        const plainText = text.replace(/<[^>]*>/g, "");
+        response = await fetch(telegramUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: TG_CHAT_ID,
+            text: plainText
+          })
+        });
+      }
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Telegram API response failed on plain text fallback as well:", errorText);
         if (taskId) {
           sentTaskIds.delete(taskId);
         }
