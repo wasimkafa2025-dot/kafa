@@ -99,7 +99,7 @@ function createDbInstance(app: FirebaseApp, mode: "user" | "workspace"): Firesto
   return getFirestore(app);
 }
 
-export function getFirebaseInstance(mode: "user" | "workspace" = "workspace"): { app: FirebaseApp; db: Firestore } {
+export function getFirebaseInstance(mode: "user" | "workspace" = "user"): { app: FirebaseApp; db: Firestore } {
   const config = mode === "user" ? USER_FIREBASE_CONFIG : WORKSPACE_FIREBASE_CONFIG;
   const appName = `taskflow_${mode}`;
 
@@ -136,12 +136,12 @@ export function getFirebaseInstance(mode: "user" | "workspace" = "workspace"): {
 
 // Default helper to get active database based on saved preferences
 export function getActiveDb(): Firestore {
-  const savedMode = (localStorage.getItem("taskflow_db_mode") as "user" | "workspace") || "workspace";
+  const savedMode = (localStorage.getItem("taskflow_db_mode") as "user" | "workspace") || "user";
   return getFirebaseInstance(savedMode).db;
 }
 
 export function getActiveDbMode(): "user" | "workspace" {
-  return (localStorage.getItem("taskflow_db_mode") as "user" | "workspace") || "workspace";
+  return (localStorage.getItem("taskflow_db_mode") as "user" | "workspace") || "user";
 }
 
 export function setActiveDbMode(mode: "user" | "workspace") {
