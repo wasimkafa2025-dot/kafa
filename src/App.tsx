@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Task, Activity, BackupSnapshot, AppSettings } from './types';
 import { getActiveDb, getActiveDbMode, getFirebaseInstance } from './lib/firebase';
 import { callGeminiProxy } from './lib/gemini';
-import { sendTelegramMessage } from './lib/telegram';
+import { sendTelegramMessage, escapeTelegramHtml } from './lib/telegram';
 import { TaskCard } from './components/TaskCard';
 import { TaskForm } from './components/TaskForm';
 import { CalendarView } from './components/CalendarView';
@@ -94,7 +94,7 @@ export default function App() {
   // --- CORE APP STATES ---
   const [currentUser, setCurrentUser] = useState<string | null>(() => {
     const saved = localStorage.getItem('taskflow_user');
-    return saved || null;
+    return saved || 'Kafa';
   });
   
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -685,7 +685,8 @@ export default function App() {
           const isKhmer = /[\u1780-\u17FF]/.test(t.task);
           const priorityEmoji = t.priority === 'High' ? '🔴' : t.priority === 'Medium' ? '🟡' : '🟢';
           const isCompleted = t.status === 'Completed';
-          const formattedTitle = isCompleted ? `<s><u>${t.task}</u></s>` : `<i>${t.task}</i>`;
+          const safeTaskTitle = escapeTelegramHtml(t.task);
+          const formattedTitle = isCompleted ? `<s><u>${safeTaskTitle}</u></s>` : `<i>${safeTaskTitle}</i>`;
           
           let messageText = '';
           if (isKhmer) {
@@ -849,6 +850,7 @@ export default function App() {
     const updated: Task = {
       ...editTask,
       ...taskData,
+      userId: currentUser || 'Kafa'
     } as Task;
 
     // Update local state and localStorage immediately
@@ -875,7 +877,8 @@ export default function App() {
     const updated: Task = {
       ...task,
       status: task.status === 'Completed' ? 'Pending' : 'Completed',
-      completedAt: task.status === 'Completed' ? null : new Date().toISOString()
+      completedAt: task.status === 'Completed' ? null : new Date().toISOString(),
+      userId: currentUser || 'Kafa'
     };
 
     // Update local state and localStorage immediately
@@ -892,20 +895,21 @@ export default function App() {
       if (updated.status === 'Completed') {
         const isKhmer = /[\u1780-\u17FF]/.test(task.task);
         const priorityEmoji = task.priority === 'High' ? '🔴' : task.priority === 'Medium' ? '🟡' : '🟢';
+        const safeTitle = escapeTelegramHtml(task.task);
         
         let messageText = '';
         if (isKhmer) {
           const priorityKh = task.priority === 'High' ? 'បន្ទាន់' : task.priority === 'Medium' ? 'មធ្យម' : 'មិនសូវបន្ទាន់';
           messageText = `<b>✅ កិច្ចការត្រូវបានបំពេញរួចរាល់!</b>\n\n` +
                         `សួស្តីលោក កាហ្វា, កិច្ចការខាងក្រោមត្រូវបានបំពេញរួចរាល់៖\n\n` +
-                        `📋 <b>ប្រធានបទ៖</b> <s><u>${task.task}</u></s>\n` +
+                        `📋 <b>ប្រធានបទ៖</b> <s><u>${safeTitle}</u></s>\n` +
                         `📅 <b>ថ្ងៃបញ្ចប់៖</b> <code>${new Date().toLocaleDateString('km-KH')}</code>\n` +
                         `⚡ <b>អាទិភាព៖</b> ${priorityEmoji} <b>${priorityKh}</b>\n\n` +
                         `សូមអរគុណ!`;
         } else {
           messageText = `<b>✅ Task Completed!</b>\n\n` +
                         `Hello Mr. Kafa, the following task has been marked completed:\n\n` +
-                        `📋 <b>Title:</b> <s><u>${task.task}</u></s>\n` +
+                        `📋 <b>Title:</b> <s><u>${safeTitle}</u></s>\n` +
                         `📅 <b>Completed At:</b> <code>${new Date().toLocaleDateString()}</code>\n` +
                         `⚡ <b>Priority:</b> ${priorityEmoji} <b>${task.priority}</b>\n\n` +
                         `Thank you!`;
@@ -931,6 +935,7 @@ export default function App() {
     const updated: Task = {
       ...task,
       date: newDate,
+      userId: currentUser || 'Kafa'
     };
 
     // Update local state and localStorage immediately
@@ -976,7 +981,8 @@ export default function App() {
       task: `${task.task} (Copy)`,
       createdAt: new Date().toISOString(),
       completedAt: null,
-      status: 'Pending'
+      status: 'Pending',
+      userId: currentUser || 'Kafa'
     };
 
     // Update local state and localStorage immediately
@@ -1000,7 +1006,8 @@ export default function App() {
     const updated = {
       ...task,
       isArchived: true,
-      status: 'Completed' as const
+      status: 'Completed' as const,
+      userId: currentUser || 'Kafa'
     };
 
     // Update local states immediately

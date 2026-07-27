@@ -90,52 +90,58 @@ function tryInitializeAnalytics(app: FirebaseApp) {
   }
 }
 
-export function getFirebaseInstance(mode: "user" | "workspace" = "user"): { app: FirebaseApp; db: Firestore } {
+const WORKSPACE_DB_ID = "ai-studio-40322e71-9f6e-4f6d-8979-34628b9aa6af";
+
+function createDbInstance(app: FirebaseApp, mode: "user" | "workspace"): Firestore {
+  if (mode === "workspace") {
+    return getFirestore(app, WORKSPACE_DB_ID);
+  }
+  return getFirestore(app);
+}
+
+export function getFirebaseInstance(mode: "user" | "workspace" = "workspace"): { app: FirebaseApp; db: Firestore } {
   const config = mode === "user" ? USER_FIREBASE_CONFIG : WORKSPACE_FIREBASE_CONFIG;
   const appName = `taskflow_${mode}`;
 
   try {
     if (getApps().some(app => app.name === appName)) {
       const app = getApp(appName);
-      const db = getFirestore(app);
+      const db = createDbInstance(app, mode);
       setupPersistence(db);
       tryInitializeAnalytics(app);
       return { app, db };
     }
 
     const app = initializeApp(config, appName);
-    const db = getFirestore(app);
+    const db = createDbInstance(app, mode);
     setupPersistence(db);
     tryInitializeAnalytics(app);
     return { app, db };
   } catch (error) {
     console.error(`Error initializing Firebase app [${mode}]:`, error);
-    // Fallback to whichever is successfully initialized
     if (getApps().length > 0) {
       const app = getApps()[0];
-      const db = getFirestore(app);
+      const db = createDbInstance(app, mode);
       setupPersistence(db);
       tryInitializeAnalytics(app);
       return { app, db };
     }
-    // Final fallback
     const app = initializeApp(config, appName);
-    const db = getFirestore(app);
+    const db = createDbInstance(app, mode);
     setupPersistence(db);
     tryInitializeAnalytics(app);
     return { app, db };
   }
 }
 
-
 // Default helper to get active database based on saved preferences
 export function getActiveDb(): Firestore {
-  const savedMode = localStorage.getItem("taskflow_db_mode") as "user" | "workspace" || "user";
+  const savedMode = (localStorage.getItem("taskflow_db_mode") as "user" | "workspace") || "workspace";
   return getFirebaseInstance(savedMode).db;
 }
 
 export function getActiveDbMode(): "user" | "workspace" {
-  return (localStorage.getItem("taskflow_db_mode") as "user" | "workspace") || "user";
+  return (localStorage.getItem("taskflow_db_mode") as "user" | "workspace") || "workspace";
 }
 
 export function setActiveDbMode(mode: "user" | "workspace") {
