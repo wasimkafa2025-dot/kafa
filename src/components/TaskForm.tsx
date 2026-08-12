@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Task } from '../types';
-import { callGeminiProxy } from '../lib/gemini';
 import { getLocalDateStr, getMonthNameFromDateStr } from '../lib/dateUtils';
-import { Sparkles, Calendar, Clock, Tag, ArrowRight, Save, RotateCcw, Mic, MicOff, CalendarDays, CalendarRange, RefreshCw } from 'lucide-react';
+import { Calendar, Clock, Tag, ArrowRight, Save, RotateCcw, Mic, MicOff, CalendarDays, CalendarRange } from 'lucide-react';
 
 interface TaskFormProps {
   type: 'daily' | 'monthly' | 'yearly';
@@ -30,9 +29,6 @@ export const TaskForm: React.FC<TaskFormProps> = ({
   const [priority, setPriority] = useState<'High' | 'Medium' | 'Low'>('Medium');
   const [status, setStatus] = useState<'Pending' | 'Completed'>('Pending');
   const [tags, setTags] = useState('');
-  const [aiInput, setAiInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [aiDescLoading, setAiDescLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [speechError, setSpeechError] = useState('');
   const [speechLang, setSpeechLang] = useState<'km-KH' | 'en-US'>(() => {
@@ -201,80 +197,6 @@ export const TaskForm: React.FC<TaskFormProps> = ({
     onSubmit(data, selectedType);
   };
 
-  const handleAiSmartFill = async () => {
-    if (!aiInput.trim()) return;
-    setLoading(true);
-    try {
-      const todayStr = getLocalDateStr();
-      const todayWeekday = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-
-      const schema = {
-        type: 'OBJECT',
-        properties: {
-          task: { type: 'STRING' },
-          description: { type: 'STRING' },
-          date: { type: 'STRING' },
-          time: { type: 'STRING' },
-          month: { type: 'STRING' },
-          priority: { type: 'STRING', enum: ['High', 'Medium', 'Low'] },
-          tags: { type: 'STRING' }
-        },
-        required: ['task', 'priority']
-      };
-
-      const prompt = `You are a parsing assistant. Parse the text into fields. Today is ${todayWeekday}, ${todayStr}.
-Text to parse: "${aiInput}"`;
-
-      const responseText = await callGeminiProxy(prompt, {
-        systemInstruction: `Parse sentences into structured tasks. Resolve relative days (e.g. tomorrow, next Wednesday) based on today's date ${todayStr}. Outputs must match the requested JSON schema constraints.`,
-        jsonSchema: schema
-      });
-
-      if (responseText) {
-        const parsed = JSON.parse(responseText);
-        if (parsed.task) setTaskName(parsed.task);
-        if (parsed.description) setDescription(parsed.description);
-        if (parsed.priority) setPriority(parsed.priority);
-        if (parsed.tags) setTags(parsed.tags);
-        if (selectedType === 'yearly' && parsed.month) {
-          setMonth(parsed.month);
-        } else {
-          if (parsed.date) setDate(parsed.date);
-          if (parsed.time) setTime(parsed.time);
-        }
-      }
-    } catch (error: any) {
-      console.error('AI smart fill failed:', error);
-      alert(`AI Smart Creator failed:\n\n${error?.message || error}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleAiGenerateDesc = async () => {
-    if (!taskName.trim()) return;
-    setAiDescLoading(true);
-    try {
-      let prompt = '';
-      if (speechLang === 'km-KH') {
-        const priorityKh = priority === 'High' ? 'ខ្ពស់' : priority === 'Medium' ? 'មធ្យម' : 'ទាប';
-        const typeKh = selectedType === 'daily' ? 'ប្រចាំថ្ងៃ' : selectedType === 'monthly' ? 'ប្រចាំខែ' : 'ប្រចាំឆ្នាំ';
-        prompt = `សូមសរសេរការពិពណ៌នាភារកិច្ចឱ្យបានសង្ខេប និងមានលក្ខណៈវិជ្ជាជីវៈ (១ ទៅ ២ ប្រយោគ) សម្រាប់ភារកិច្ចកម្រិតអាទិភាព ${priorityKh} ប្រភេទ ${typeKh} ដែលមានចំណងជើងថា "${taskName}"។ កុំចម្លងចំណងជើងឡើងវិញ។ ចម្លើយទាំងមូលត្រូវតែសរសេរជាភាសាខ្មែរ (Khmer language) ដ៏ត្រឹមត្រូវ និងទាក់ទាញ។ ហាមដាច់ខាតមិនត្រូវបញ្ចូលភាសាអង់គ្លេសឡើយ។ ផ្តល់តែអត្ថបទពិពណ៌នាសុទ្ធសាធ (plain text) គ្មានសញ្ញាសម្រង់ ឬពាក្យផ្តើមឡើយ។`;
-      } else {
-        prompt = `Write a concise, professional task description (1-2 sentences) for a ${priority} priority ${selectedType} task titled "${taskName}". Do not copy the title. Plain text output only, no quotes, no conversational filler.`;
-      }
-      const response = await callGeminiProxy(prompt);
-      if (response) {
-        setDescription(response.trim());
-      }
-    } catch (error: any) {
-      console.error('AI description generator failed:', error);
-      alert(`AI Description Generation failed:\n\n${error?.message || error}`);
-    } finally {
-      setAiDescLoading(false);
-    }
-  };
-
   const formTitleText = editTask 
     ? `Edit ${selectedType.charAt(0).toUpperCase() + selectedType.slice(1)} Task` 
     : `Add ${selectedType.charAt(0).toUpperCase() + selectedType.slice(1)} Task`;
@@ -323,41 +245,6 @@ Text to parse: "${aiInput}"`;
               <span>Yearly</span>
             </button>
           </div>
-        </div>
-      )}
-
-      {/* AI Smart Creator Panel (Only visible on Add Task) */}
-      {!editTask && (
-        <div className="p-3 bg-gold-500/5 border border-gold-500/20 rounded-xl space-y-2">
-          <label className="flex items-center gap-1 text-xs font-semibold text-gold-600 dark:text-gold-500 select-none">
-            <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-            <span>AI Smart Creator</span>
-          </label>
-          <div className="flex gap-2">
-            <input 
-              type="text" 
-              value={aiInput}
-              onChange={(e) => setAiInput(e.target.value)}
-              placeholder="e.g. Call supplier tomorrow at 3pm, high priority" 
-              className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg dark:bg-slate-900/50 dark:border-slate-800 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-gold-500"
-            />
-            <button 
-              type="button" 
-              onClick={handleAiSmartFill}
-              disabled={loading}
-              className="px-3 py-1.5 bg-gold-500 hover:bg-gold-600 text-white rounded-lg flex items-center gap-1 text-xs font-semibold whitespace-nowrap cursor-pointer transition-colors"
-            >
-              {loading ? (
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <>
-                  <Sparkles className="w-3 h-3" />
-                  <span>Fill</span>
-                </>
-              )}
-            </button>
-          </div>
-          <p className="text-[10px] text-gray-400">Describe the task in plain words and click Fill to automatically fill fields below.</p>
         </div>
       )}
 
@@ -430,15 +317,6 @@ Text to parse: "${aiInput}"`;
                   {speechError}
                 </span>
               )}
-              <button 
-                type="button" 
-                disabled={!taskName.trim() || aiDescLoading}
-                onClick={handleAiGenerateDesc}
-                className="text-[10px] text-gold-600 dark:text-gold-500 hover:underline flex items-center gap-0.5 font-semibold cursor-pointer disabled:opacity-50"
-              >
-                <Sparkles className="w-3 h-3" />
-                <span>{aiDescLoading ? 'Thinking...' : 'Generate with AI'}</span>
-              </button>
             </div>
           </div>
           <textarea 

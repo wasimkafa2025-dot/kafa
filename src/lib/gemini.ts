@@ -24,7 +24,11 @@ export async function callGeminiProxy(prompt: string, options: { systemInstructi
       const data = await response.json();
       return data.text || null;
     }
-    console.warn("Express Gemini proxy returned non-OK status. Falling back to direct client-side Gemini API...");
+    const errData = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      throw new Error(errData.error || "Gemini API key is required. Please set your API key in Settings.");
+    }
+    console.warn("Express Gemini proxy returned status", response.status, errData.error);
   } catch (error) {
     console.warn("Express Gemini proxy unreachable. Falling back to direct client-side Gemini API...", error);
   }
@@ -46,7 +50,7 @@ export async function callGeminiProxy(prompt: string, options: { systemInstructi
     }
   }
 
-  const models = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-pro", "gemini-1.5-pro"];
+  const models = ["gemini-2.0-flash", "gemini-flash", "gemini-pro"];
   let lastError: any = null;
 
   for (const model of models) {

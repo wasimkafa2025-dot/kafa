@@ -102,51 +102,77 @@ async function startServer() {
 
       // Check header or environment variable for Gemini key
       const clientKey = req.headers["x-gemini-key"] as string;
-      const apiKey = clientKey || process.env.GEMINI_API_KEY;
+      const apiKeysToTry: string[] = [];
+      if (clientKey) apiKeysToTry.push(clientKey);
+      if (process.env.GEMINI_API_KEY && !apiKeysToTry.includes(process.env.GEMINI_API_KEY)) {
+        apiKeysToTry.push(process.env.GEMINI_API_KEY);
+      }
 
-      if (!apiKey) {
+      if (apiKeysToTry.length === 0) {
         res.status(401).json({
-          error: "Gemini API key is required. Set it in the AI Settings or environment."
+          error: "Gemini API key is required. Please click the gear icon (⚙️) on the top right to configure your API Key."
         });
         return;
       }
 
-      const ai = new GoogleGenAI({ 
-        apiKey,
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build"
-          }
-        }
-      });
-      const config: any = {};
-      
-      if (systemInstruction) {
-        config.systemInstruction = systemInstruction;
-      }
-      if (jsonSchema) {
-        config.responseMimeType = "application/json";
-        config.responseSchema = jsonSchema;
-      }
-
-      const modelsToTry = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-pro", "gemini-1.5-pro"];
+      const modelsToTry = ["gemini-2.0-flash", "gemini-flash", "gemini-pro"];
       let lastError: any = null;
       let responseText = "";
       let success = false;
 
-      for (const model of modelsToTry) {
-        try {
-          const response = await ai.models.generateContent({
-            model: model,
-            contents: prompt,
-            config: config
-          });
-          responseText = response.text || "";
-          success = true;
-          break;
-        } catch (err: any) {
-          console.warn(`Gemini API calling error for model ${model}:`, err);
-          lastError = err;
+      // Strategy 1: Full config with schema (if provided)
+      // Strategy 2: MimeType application/json without strict schema
+      // Strategy 3: Standard text prompt with system instruction
+      const configAttempts: any[] = [];
+      
+      const baseConfig: any = {};
+      if (systemInstruction) {
+        baseConfig.systemInstruction = systemInstruction;
+      }
+
+      if (jsonSchema) {
+        configAttempts.push({
+          ...baseConfig,
+          responseMimeType: "application/json",
+          responseSchema: jsonSchema
+        });
+        configAttempts.push({
+          ...baseConfig,
+          responseMimeType: "application/json"
+        });
+      }
+      configAttempts.push(baseConfig);
+
+      for (const keyToUse of apiKeysToTry) {
+        if (success) break;
+        const ai = new GoogleGenAI({
+          apiKey: keyToUse,
+          httpOptions: {
+            headers: {
+              "User-Agent": "aistudio-build"
+            }
+          }
+        });
+
+        for (const configAttempt of configAttempts) {
+          if (success) break;
+          for (const model of modelsToTry) {
+            try {
+              const response = await ai.models.generateContent({
+                model: model,
+                contents: prompt,
+                config: configAttempt
+              });
+              if (response && response.text) {
+                responseText = response.text;
+                success = true;
+                break;
+              }
+            } catch (err: any) {
+              console.warn(`Gemini API error for model ${model}:`, err?.message || err);
+              lastError = err;
+            }
+          }
         }
       }
 
@@ -157,7 +183,7 @@ async function startServer() {
       res.json({ text: responseText });
     } catch (error: any) {
       console.error("Gemini AI API calling error:", error);
-      res.status(500).json({ error: error.message || "Generative request failed" });
+      res.status(500).json({ error: error?.message || "Generative request failed" });
     }
   });
 

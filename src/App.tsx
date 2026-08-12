@@ -3,7 +3,7 @@ import { Task, Activity, BackupSnapshot, AppSettings } from './types';
 import { getActiveDb, getActiveDbMode, getFirebaseInstance } from './lib/firebase';
 import { callGeminiProxy } from './lib/gemini';
 import { sendTelegramMessage, escapeTelegramHtml } from './lib/telegram';
-import { getLocalDateStr, getMonthNameFromDateStr } from './lib/dateUtils';
+import { getLocalDateStr, isTaskOneDayBefore, getMonthNameFromDateStr } from './lib/dateUtils';
 import { TaskCard } from './components/TaskCard';
 import { TaskForm } from './components/TaskForm';
 import { CalendarView } from './components/CalendarView';
@@ -613,15 +613,11 @@ export default function App() {
         }
       });
 
-      // 2. Automated Telegram alerts before one day (Exactly 24 hours / 1 day)
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const tomorrowStr = getLocalDateStr(tomorrow);
-
+      // 2. Automated Telegram alerts 1 day before task date (24 hours advance notice)
       for (const t of currentTasks) {
-        if ((t.status === 'Pending' || t.status === 'Completed') && t.date === tomorrowStr && !t.telegramNotified) {
-          // Check local storage guard to prevent double dispatch in multi-tab setups
-          if (localStorage.getItem(`tg_notified_${t.id}`)) {
+        if (t.status === 'Pending' && !t.telegramNotified) {
+          // Verify if task date is 1 day before today (due tomorrow)
+          if (!isTaskOneDayBefore(t.date)) {
             continue;
           }
 
@@ -630,32 +626,28 @@ export default function App() {
             continue;
           }
           inFlightTelegramAlerts.add(t.id);
-          localStorage.setItem(`tg_notified_${t.id}`, 'true');
 
           const db = getActiveDb();
           const taskRef = doc(db, "tasks", t.id);
-          const alertKey = `${t.id}_${t.date}`;
+          const alertKey = `tg_alert_${t.id}_${t.date}`;
           const alertLockRef = doc(db, "telegram_sent_alerts", alertKey);
 
+          let lockAcquired = false;
           try {
-            let txSuccess = false;
             await runTransaction(db, async (transaction) => {
-              // 1. Check the centralized alert lock collection first to prevent double-sends across domains/devices
-              const lockDoc = await transaction.get(alertLockRef);
-              if (lockDoc.exists()) {
-                throw new Error("Alert already sent according to lock collection");
-              }
-
-              // 2. Double-check the task document itself
               const taskDoc = await transaction.get(taskRef);
               if (taskDoc.exists()) {
                 const data = taskDoc.data();
-                if (data.telegramNotified || !(data.status === 'Pending' || data.status === 'Completed')) {
+                if (data.telegramNotified || data.status !== 'Pending') {
                   throw new Error("Already notified or task status changed");
                 }
               }
 
-              // 3. Atomically create the lock document
+              const lockDoc = await transaction.get(alertLockRef);
+              if (lockDoc.exists()) {
+                throw new Error("Lock document already exists");
+              }
+
               transaction.set(alertLockRef, {
                 sent: true,
                 sentAt: new Date().toISOString(),
@@ -664,57 +656,55 @@ export default function App() {
                 userId: currentUser
               });
 
-              // 4. Update the task state in Firestore
               transaction.update(taskRef, { telegramNotified: true });
-              txSuccess = true;
+              lockAcquired = true;
             });
-
-            if (!txSuccess) {
-              continue;
-            }
           } catch (txError: any) {
-            console.log(`[Alert Shield] Blocked concurrent/duplicate alert trigger:`, txError.message);
-            // Mark locally so we don't try again in this session/loop run
-            inFlightTelegramAlerts.add(t.id);
-            localStorage.setItem(`tg_notified_${t.id}`, 'true');
+            console.log(`[Alert Shield] Skipped transaction trigger:`, txError.message);
+            inFlightTelegramAlerts.delete(t.id);
+            continue;
+          }
+
+          if (!lockAcquired) {
+            inFlightTelegramAlerts.delete(t.id);
             continue;
           }
 
           // Send Telegram message proxied securely through server
           const isKhmer = /[\u1780-\u17FF]/.test(t.task);
           const priorityEmoji = t.priority === 'High' ? '🔴' : t.priority === 'Medium' ? '🟡' : '🟢';
-          const isCompleted = t.status === 'Completed';
           const safeTaskTitle = escapeTelegramHtml(t.task);
-          const formattedTitle = isCompleted ? `<s><u>${safeTaskTitle}</u></s>` : `<i>${safeTaskTitle}</i>`;
+          const formattedTitle = `<i>${safeTaskTitle}</i>`;
           
           let messageText = '';
           if (isKhmer) {
             const priorityKh = t.priority === 'High' ? 'បន្ទាន់' : t.priority === 'Medium' ? 'មធ្យម' : 'មិនសូវបន្ទាន់';
-            const statusText = isCompleted ? '✅ <b>កិច្ចការត្រូវបានបំពេញរួចរាល់!</b>' : `${priorityEmoji} <b>${priorityKh}</b>`;
-            messageText = `<b>🔔 សេចក្តីរំលឹកពីការងារដែលត្រូវបំពេញ</b>\n\n` +
-                          `សួស្តីលោក កាហ្វា, អ្នកមានកិច្ចការ ឬកិច្ចប្រជុំដែលនឹងត្រូវធ្វើដូចខាងក្រោម៖\n\n` +
+            const statusText = `${priorityEmoji} <b>${priorityKh}</b>`;
+            messageText = `<b>🔔 សេចក្តីរំលឹកពីការងារដែលត្រូវបំពេញ (១ ថ្ងៃមុន)</b>\n\n` +
+                          `សួស្តីលោក កាហ្វា, នេះជាការរំលឹក ១ ថ្ងៃមុន សម្រាប់កិច្ចការដែលត្រូវបំពេញនៅថ្ងៃស្អែក៖\n\n` +
                           `📋 <b>ប្រធានបទ៖</b> ${formattedTitle}\n` +
-                          `📅 <b>ថ្ងៃ ខែ ឆ្នាំ៖</b> <code>${t.date || '--'}</code>\n` +
+                          `📅 <b>ថ្ងៃស្អែក៖</b> <code>${t.date || '--'}</code>\n` +
                           `🕒 <b>ពេលវេលា៖</b> <code>${t.time || '--:--'}</code>\n` +
-                          `⚡ <b>ស្ថានភាព/អាទិភាព៖</b> ${statusText}\n\n` +
+                          `⚡ <b>កម្រិតអាទិភាព៖</b> ${statusText}\n\n` +
                           `សូមអរគុណ!`;
           } else {
-            const statusText = isCompleted ? '✅ <b>Task Completed!</b>' : `${priorityEmoji} <b>${t.priority}</b>`;
-            messageText = `<b>🔔 TaskFlow Alert</b>\n\n` +
-                          `Hello Mr. Kafa, here is your upcoming task:\n\n` +
+            const statusText = `${priorityEmoji} <b>${t.priority}</b>`;
+            messageText = `<b>⏰ 1-DAY ADVANCE TASK REMINDER</b>\n\n` +
+                          `Hello Mr. Kafa, this is your 1-day advance reminder for tomorrow's scheduled task:\n\n` +
                           `📋 <b>Title:</b> ${formattedTitle}\n` +
-                          `📅 <b>Date:</b> <code>${t.date || '--'}</code>\n` +
-                          `🕒 <b>Time:</b> <code>${t.time || '--:--'}</code>\n` +
-                          `⚡ <b>Priority/Status:</b> ${statusText}\n\n` +
+                          `📅 <b>Tomorrow's Date:</b> <code>${t.date || '--'}</code>\n` +
+                          `🕒 <b>Scheduled Time:</b> <code>${t.time || '--:--'}</code>\n` +
+                          `⚡ <b>Priority:</b> ${statusText}\n\n` +
                           `Thank you!`;
           }
           
           try {
             const success = await sendTelegramMessage(messageText, t.id);
             if (success) {
+              localStorage.setItem(`tg_notified_${t.id}`, 'true');
               logActivity(`Sent automated Telegram alert 1 day before for: "${t.task}"`);
             } else {
-              // Failed to send, revert the database notification status and lock so it can retry
+              // Failed to send, revert database notification status so it retries
               await deleteDoc(alertLockRef).catch(() => {});
               await updateDoc(taskRef, { telegramNotified: false }).catch(() => {});
               inFlightTelegramAlerts.delete(t.id);
@@ -839,38 +829,6 @@ export default function App() {
       console.warn("Firestore write failed, using local/offline storage:", e);
       logActivity(`Offline write for task: "${taskData.task}"`);
     }
-
-    // Trigger immediate Telegram notification for new task
-    const isKhmer = /[\u1780-\u17FF]/.test(newTask.task);
-    const priorityEmoji = newTask.priority === 'High' ? '🔴' : newTask.priority === 'Medium' ? '🟡' : '🟢';
-    const safeTitle = escapeTelegramHtml(newTask.task);
-    let messageText = '';
-    if (isKhmer) {
-      const priorityKh = newTask.priority === 'High' ? 'បន្ទាន់' : newTask.priority === 'Medium' ? 'មធ្យម' : 'មិនសូវបន្ទាន់';
-      messageText = `<b>📌 កិច្ចការថ្មីត្រូវបានបង្កើត</b>\n\n` +
-                    `សួស្តីលោក កាហ្វា, កិច្ចការថ្មីមួយត្រូវបានកត់ត្រាទុក៖\n\n` +
-                    `📋 <b>ប្រធានបទ៖</b> <i>${safeTitle}</i>\n` +
-                    `📅 <b>ថ្ងៃ ខែ ឆ្នាំ៖</b> <code>${newTask.date || '--'}</code>\n` +
-                    `🕒 <b>ពេលវេលា៖</b> <code>${newTask.time || '--:--'}</code>\n` +
-                    `⚡ <b>អាទិភាព៖</b> ${priorityEmoji} <b>${priorityKh}</b>\n\n` +
-                    `សូមអរគុណ!`;
-    } else {
-      messageText = `<b>📌 New Task Created</b>\n\n` +
-                    `Hello Mr. Kafa, a new task has been recorded:\n\n` +
-                    `📋 <b>Title:</b> <i>${safeTitle}</i>\n` +
-                    `📅 <b>Date:</b> <code>${newTask.date || '--'}</code>\n` +
-                    `🕒 <b>Time:</b> <code>${newTask.time || '--:--'}</code>\n` +
-                    `⚡ <b>Priority:</b> ${priorityEmoji} <b>${newTask.priority}</b>\n\n` +
-                    `Thank you!`;
-    }
-
-    sendTelegramMessage(messageText, `created_${newTask.id}`).then((success) => {
-      if (success) {
-        logActivity(`Sent creation Telegram alert for: "${newTask.task}"`);
-      }
-    }).catch((err) => {
-      console.error("Error sending creation Telegram message:", err);
-    });
 
     setQuickAddModal({ open: false, type: 'daily' });
   };
