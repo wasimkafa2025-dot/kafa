@@ -104,46 +104,67 @@ async function startServer() {
         return;
       }
       const clientKey = req.headers["x-gemini-key"];
-      const apiKey = clientKey || process.env.GEMINI_API_KEY;
-      if (!apiKey) {
+      const apiKeysToTry = [];
+      if (clientKey) apiKeysToTry.push(clientKey);
+      if (process.env.GEMINI_API_KEY && !apiKeysToTry.includes(process.env.GEMINI_API_KEY)) {
+        apiKeysToTry.push(process.env.GEMINI_API_KEY);
+      }
+      if (apiKeysToTry.length === 0) {
         res.status(401).json({
-          error: "Gemini API key is required. Set it in the AI Settings or environment."
+          error: "Gemini API key is required. Please click the gear icon (\u2699\uFE0F) on the top right to configure your API Key."
         });
         return;
       }
-      const ai = new import_genai.GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build"
-          }
-        }
-      });
-      const config = {};
-      if (systemInstruction) {
-        config.systemInstruction = systemInstruction;
-      }
-      if (jsonSchema) {
-        config.responseMimeType = "application/json";
-        config.responseSchema = jsonSchema;
-      }
-      const modelsToTry = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-pro", "gemini-1.5-pro"];
+      const modelsToTry = ["gemini-2.0-flash", "gemini-flash", "gemini-pro"];
       let lastError = null;
       let responseText = "";
       let success = false;
-      for (const model of modelsToTry) {
-        try {
-          const response = await ai.models.generateContent({
-            model,
-            contents: prompt,
-            config
-          });
-          responseText = response.text || "";
-          success = true;
-          break;
-        } catch (err) {
-          console.warn(`Gemini API calling error for model ${model}:`, err);
-          lastError = err;
+      const configAttempts = [];
+      const baseConfig = {};
+      if (systemInstruction) {
+        baseConfig.systemInstruction = systemInstruction;
+      }
+      if (jsonSchema) {
+        configAttempts.push({
+          ...baseConfig,
+          responseMimeType: "application/json",
+          responseSchema: jsonSchema
+        });
+        configAttempts.push({
+          ...baseConfig,
+          responseMimeType: "application/json"
+        });
+      }
+      configAttempts.push(baseConfig);
+      for (const keyToUse of apiKeysToTry) {
+        if (success) break;
+        const ai = new import_genai.GoogleGenAI({
+          apiKey: keyToUse,
+          httpOptions: {
+            headers: {
+              "User-Agent": "aistudio-build"
+            }
+          }
+        });
+        for (const configAttempt of configAttempts) {
+          if (success) break;
+          for (const model of modelsToTry) {
+            try {
+              const response = await ai.models.generateContent({
+                model,
+                contents: prompt,
+                config: configAttempt
+              });
+              if (response && response.text) {
+                responseText = response.text;
+                success = true;
+                break;
+              }
+            } catch (err) {
+              console.warn(`Gemini API error for model ${model}:`, err?.message || err);
+              lastError = err;
+            }
+          }
         }
       }
       if (!success) {
@@ -152,7 +173,7 @@ async function startServer() {
       res.json({ text: responseText });
     } catch (error) {
       console.error("Gemini AI API calling error:", error);
-      res.status(500).json({ error: error.message || "Generative request failed" });
+      res.status(500).json({ error: error?.message || "Generative request failed" });
     }
   });
   if (process.env.NODE_ENV !== "production") {
