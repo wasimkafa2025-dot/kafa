@@ -137,11 +137,11 @@ html:not(.dark) .calendar-day-cell:hover {
 /* Day Mode sidebar item active state */
 html:not(.dark) .sidebar-item.active {
   background-color: rgba(197, 155, 39, 0.15) !important;
-  color: #C59B27 !important;
-  border-right: 4px solid #C59B27 !important;
+  color: var(--gold) !important;
+  border-right: 4px solid var(--gold) !important;
 }
 html:not(.dark) .sidebar-item.active * {
-  color: #C59B27 !important;
+  color: var(--gold) !important;
 }
 
 
@@ -274,26 +274,26 @@ html:not(.dark) .sidebar-item.active * {
 }
 
 .sidebar-item:hover {
-  background: rgba(253, 249, 226, 0.5) !important;
-  color: #C59B27 !important;
+  background: rgba(197, 155, 39, 0.1) !important;
+  color: var(--gold) !important;
 }
 
 .dark .sidebar-item:hover {
-  background: rgba(212, 175, 55, 0.1) !important;
-  color: #FFD700 !important;
+  background: rgba(248, 233, 161, 0.1) !important;
+  color: var(--gold) !important;
 }
 
 .sidebar-item.active {
-  background-color: #FDF9E2 !important;
-  color: #C59B27 !important;
+  background-color: rgba(197, 155, 39, 0.15) !important;
+  color: var(--gold) !important;
   font-weight: 600;
-  border-right: 4px solid #C59B27 !important;
+  border-right: 4px solid var(--gold) !important;
 }
 
 .dark .sidebar-item.active {
-  background-color: rgba(212, 175, 55, 0.15) !important;
-  color: #FFD700 !important;
-  border-right: 4px solid #FFD700 !important;
+  background-color: rgba(248, 233, 161, 0.15) !important;
+  color: var(--gold) !important;
+  border-right: 4px solid var(--gold) !important;
 }
 
 /* Glassmorphism utility */

@@ -15,6 +15,7 @@ export interface Task {
   reminderSent?: boolean;
   dueAlerted?: boolean;
   telegramNotified?: boolean;
+  isArchived?: boolean;
 }
 
 export interface Activity {

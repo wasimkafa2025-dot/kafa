@@ -4,10 +4,13 @@ import { getActiveDb, getActiveDbMode, getFirebaseInstance } from './lib/firebas
 import { callGeminiProxy } from './lib/gemini';
 import { sendTelegramMessage, escapeTelegramHtml } from './lib/telegram';
 import { getLocalDateStr, isTaskOneDayBefore, getMonthNameFromDateStr } from './lib/dateUtils';
+import { syncTaskToGoogleSheet, syncAllTasksToGoogleSheet } from './lib/sheets';
 import { TaskCard } from './components/TaskCard';
 import { TaskForm } from './components/TaskForm';
 import { CalendarView } from './components/CalendarView';
 import { SettingsModal } from './components/SettingsModal';
+import { ThemeColorModal } from './components/ThemeColorModal';
+import { applyColorThemes } from './lib/themeManager';
 
 import { 
   collection, 
@@ -69,7 +72,9 @@ import {
   Flag,
   Bell,
   RefreshCw,
-  Send
+  Send,
+  FileSpreadsheet,
+  Palette
 } from 'lucide-react';
 
 function generateUUID() {
@@ -127,6 +132,8 @@ export default function App() {
   const [detailModalTask, setDetailModalTask] = useState<Task | null>(null);
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showThemeColorModal, setShowThemeColorModal] = useState(false);
+  const [isSheetsSyncing, setIsSheetsSyncing] = useState(false);
   
   // Custom auth states
   const [usernameInput, setUsernameInput] = useState('kafa');
@@ -339,6 +346,10 @@ export default function App() {
           setShowSettingsModal(false);
           closedSomething = true;
         }
+        if (showThemeColorModal) {
+          setShowThemeColorModal(false);
+          closedSomething = true;
+        }
         if (showBackupModal) {
           setShowBackupModal(false);
           closedSomething = true;
@@ -429,6 +440,7 @@ export default function App() {
 
   // --- THEME APPLY ENGINE ---
   useEffect(() => {
+    applyColorThemes();
     const root = document.documentElement;
     if (theme === 'dark') {
       root.classList.add('dark');
@@ -577,10 +589,18 @@ export default function App() {
     return () => unsubscribe();
   }, [currentUser, dbMode]);
 
-  // Keep tasks reference fresh for the interval loop without triggering effect re-execution
+  // Keep tasks reference fresh for the interval loop and sync to 24/7 server worker
   const latestTasksRef = useRef<Task[]>([]);
   useEffect(() => {
     latestTasksRef.current = tasks;
+    if (tasks && tasks.length > 0) {
+      // Synchronize latest task state to 24/7 background worker
+      fetch('/api/tasks/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tasks })
+      }).catch(() => {});
+    }
   }, [tasks]);
 
   // --- REAL-TIME DUE ALARMS & AUTOMATIC TELEGRAM ALERTS ---
@@ -796,6 +816,27 @@ export default function App() {
     };
   }, [currentUser, activeView, tasks, theme]);
 
+  // --- GOOGLE SHEETS QUICK BATCH SYNC ---
+  const handleQuickSyncGoogleSheets = async () => {
+    if (tasks.length === 0) {
+      logActivity("Google Sheet sync: No active tasks to sync");
+      return;
+    }
+    setIsSheetsSyncing(true);
+    try {
+      const res = await syncAllTasksToGoogleSheet(tasks);
+      if (res.success) {
+        logActivity(`Synchronized ${tasks.length} task(s) to Google Sheet backend`);
+      } else {
+        console.warn("Google Sheet sync error:", res.error);
+      }
+    } catch (e: any) {
+      console.error("Google Sheet batch sync error:", e);
+    } finally {
+      setIsSheetsSyncing(false);
+    }
+  };
+
   // --- ACTIONS: WRITE / DELETE FIREBASE ASYNC ---
   const handleAddTask = async (taskData: Partial<Task>, type: 'daily' | 'monthly' | 'yearly') => {
     if (!currentUser) return;
@@ -830,6 +871,13 @@ export default function App() {
       logActivity(`Offline write for task: "${taskData.task}"`);
     }
 
+    // Synchronize with Google Sheet backend
+    syncTaskToGoogleSheet(newTask, 'add').then(res => {
+      if (res.success) {
+        logActivity(`Synced task to Google Sheet: "${newTask.task}"`);
+      }
+    }).catch(err => console.warn("Google Sheet sync error:", err));
+
     setQuickAddModal({ open: false, type: 'daily' });
   };
 
@@ -854,6 +902,13 @@ export default function App() {
     } catch (e) {
       console.warn("Firestore update failed, using local/offline storage:", e);
     }
+
+    // Synchronize with Google Sheet backend
+    syncTaskToGoogleSheet(updated, 'update').then(res => {
+      if (res.success) {
+        logActivity(`Synced updated task to Google Sheet: "${updated.task}"`);
+      }
+    }).catch(err => console.warn("Google Sheet sync error:", err));
 
     setEditTask(null);
     setQuickAddModal({ open: false, type: 'daily' });
@@ -915,6 +970,11 @@ export default function App() {
     } catch (e) {
       console.warn("Firestore write failed, using local/offline storage:", e);
     }
+
+    // Synchronize completion status with Google Sheet backend
+    syncTaskToGoogleSheet(updated, updated.status === 'Completed' ? 'complete' : 'update').catch(err => {
+      console.warn("Google Sheet sync error on toggle:", err);
+    });
   };
 
   const handleUpdateTaskDate = async (id: string, newDate: string) => {
@@ -939,6 +999,11 @@ export default function App() {
     } catch (e) {
       console.warn("Firestore update failed, using local/offline storage:", e);
     }
+
+    // Synchronize updated date with Google Sheet backend
+    syncTaskToGoogleSheet(updated, 'update').catch(err => {
+      console.warn("Google Sheet sync error on date change:", err);
+    });
   };
 
   const handleDeleteTask = async (id: string) => {
@@ -957,6 +1022,13 @@ export default function App() {
     } catch (e) {
       console.warn("Firestore delete failed, using local/offline storage:", e);
     }
+
+    // Synchronize deletion with Google Sheet backend
+    syncTaskToGoogleSheet(task, 'delete').then(res => {
+      if (res.success) {
+        logActivity(`Deleted task from Google Sheet backend: "${task.task}"`);
+      }
+    }).catch(err => console.warn("Google Sheet sync error on delete:", err));
   };
 
   const handleDuplicateTask = async (id: string) => {
@@ -986,6 +1058,9 @@ export default function App() {
     } catch (e) {
       console.warn("Firestore duplicate failed, using local/offline storage:", e);
     }
+
+    // Synchronize cloned task with Google Sheet backend
+    syncTaskToGoogleSheet(cloned, 'add').catch(err => console.warn("Google Sheet sync error on duplicate:", err));
   };
 
   const handleArchiveTask = async (id: string) => {
@@ -1013,6 +1088,9 @@ export default function App() {
     } catch (e) {
       console.warn("Firestore archive failed, using local/offline storage:", e);
     }
+
+    // Synchronize archived task with Google Sheet backend
+    syncTaskToGoogleSheet(updated, 'archive').catch(err => console.warn("Google Sheet sync error on archive:", err));
   };
 
   const handleRestoreArchived = async (id: string) => {
@@ -1039,10 +1117,15 @@ export default function App() {
     } catch (e) {
       console.warn("Firestore restore failed, using local/offline storage:", e);
     }
+
+    // Synchronize restored task with Google Sheet backend
+    syncTaskToGoogleSheet(updated, 'update').catch(err => console.warn("Google Sheet sync error on restore:", err));
   };
 
   // Permanent Delete
   const handlePermanentDelete = async (id: string) => {
+    const taskToDelete = archivedTasks.find(t => t.id === id);
+
     // Update local archived state immediately
     const updatedArchived = archivedTasks.filter(t => t.id !== id);
     setArchivedTasks(updatedArchived);
@@ -1053,6 +1136,11 @@ export default function App() {
       logActivity(`Permanently deleted task from cloud storage`);
     } catch (e) {
       console.warn("Firestore permanent delete failed, using local/offline storage:", e);
+    }
+
+    // Synchronize delete with Google Sheet backend
+    if (taskToDelete) {
+      syncTaskToGoogleSheet(taskToDelete, 'delete').catch(err => console.warn("Google Sheet sync error on delete:", err));
     }
   };
 
@@ -1849,13 +1937,7 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
               {!sidebarCollapsed && <span>Import JSON</span>}
             </label>
 
-            <button 
-              onClick={() => setShowSettingsModal(true)}
-              className="w-full flex items-center gap-3 p-3.5 md:p-2.5 rounded-xl text-gray-600 hover:bg-gold-500/5 hover:text-[#C59B27] transition-all dark:text-gray-300 cursor-pointer text-xs text-left"
-            >
-              <Settings className="w-4 h-4 shrink-0 text-[#C59B27]" />
-              {!sidebarCollapsed && <span>Cloud Sync / AI</span>}
-            </button>
+            {/* Settings & Theme Color modal buttons hidden from left sidebar per user request. Palette remains in header next to Sun/Moon button. */}
             
             {/* Keyboard Shortcuts Info Section hidden from UI to declutter, but keyboard shortcuts logic remains active */}
           </div>
@@ -1924,11 +2006,31 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
                   ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 dark:bg-emerald-500/5 dark:text-emerald-400 dark:border-emerald-500/10' 
                   : 'bg-red-500/10 text-red-600 border-red-500/20 dark:bg-red-500/5 dark:text-red-400 dark:border-red-500/10 animate-pulse'
               }`}
-              title={isOnline ? "Connected and synchronized with Cloud database" : "Working offline - updates are saved locally and will auto-sync once restored"}
+              title={isOnline ? "Connected and synchronized with Cloud Firestore database" : "Working offline - updates are saved locally and will auto-sync once restored"}
             >
               {isOnline ? <Wifi className="w-3.5 h-3.5 text-emerald-500 shrink-0" /> : <WifiOff className="w-3.5 h-3.5 text-red-500 shrink-0" />}
               <span className="hidden md:inline">{isOnline ? 'Cloud Synced' : 'Offline Mode'}</span>
             </div>
+
+            {/* Google Sheets Backend Quick Sync Button & Badge */}
+            <button
+              type="button"
+              onClick={handleQuickSyncGoogleSheets}
+              disabled={isSheetsSyncing}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full border text-[11px] font-semibold transition-all cursor-pointer bg-emerald-500/10 text-emerald-700 border-emerald-500/20 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/20 active:scale-95 select-none"
+              title="Backend Google Sheet is connected. Click to immediately sync all tasks to your Google Sheet spreadsheet."
+            >
+              <FileSpreadsheet className={`w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 ${isSheetsSyncing ? 'animate-spin' : ''}`} />
+              <span className="hidden md:inline">{isSheetsSyncing ? 'Syncing...' : 'Sheet Synced'}</span>
+            </button>
+
+            <button 
+              onClick={() => setShowThemeColorModal(true)}
+              className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-500 dark:text-gold-500 transition-colors cursor-pointer"
+              title="កែសម្រួលពណ៌ប្រព័ន្ធ ថ្ងៃ / យប់ (Customize Theme Colors)"
+            >
+              <Palette className="w-5 h-5 text-amber-500" />
+            </button>
 
             <button 
               onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
@@ -2602,6 +2704,19 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
               >
                 {detailModalTask.status === 'Completed' ? 'Mark Pending' : 'Mark Completed'}
               </button>
+              <button 
+                type="button"
+                onClick={() => { 
+                  if (window.confirm("លុបកិច្ចការនេះចេញពីប្រព័ន្ធ និង Google Sheet? / Delete this task from system and Google Sheet?")) {
+                    handleDeleteTask(detailModalTask.id); 
+                    setDetailModalTask(null); 
+                  }
+                }}
+                className="px-3.5 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/20 rounded-xl cursor-pointer transition-colors flex items-center justify-center"
+                title="លុបចេញពីប្រព័ន្ធ និង Google Sheet / Delete from system and Google Sheet"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
             </div>
           </div>
         </div>
@@ -2651,6 +2766,17 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
         <SettingsModal 
           onClose={() => setShowSettingsModal(false)}
           onRefreshState={() => setDbMode(getActiveDbMode())}
+          tasks={tasks}
+          onOpenThemeColors={() => setShowThemeColorModal(true)}
+        />
+      )}
+
+      {/* MODAL: Custom Theme Colors Customizer (Day & Night) */}
+      {showThemeColorModal && (
+        <ThemeColorModal
+          onClose={() => setShowThemeColorModal(false)}
+          currentAppTheme={theme}
+          setAppTheme={setTheme}
         />
       )}
 
