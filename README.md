@@ -1,20 +1,34 @@
-# TaskFlow Task & Productivity Manager - GitHub Deployment Guide
+# Daily Task Management - GitHub Deployment Guide
 
-This project is a modern React SPA (Single Page Application) styled with Tailwind CSS, supporting local productivity tracking, robust data backup/snapshots, AI productivity reporting (integrated with Gemini), and Telegram system alert delivery.
-
-This guide provides step-by-step instructions for hosting and deploying this application directly on **GitHub Pages**.
+This project is a modern React SPA (Single Page Application) styled with Tailwind CSS, supporting local and cloud productivity tracking, real-time Firestore database sync, customizable day/night color themes, AI productivity reporting, and Telegram notifications.
 
 ---
 
-## 🚀 Quick Setup for GitHub Pages
+## 🚀 របៀប Publish ទៅកាន់ GitHub ពី Google AI Studio ដោយផ្ទាល់ (Direct 1-Click Update)
 
-### Step 1: Create a GitHub Repository
-1. Log in to your GitHub account.
-2. Create a new repository (e.g., named `taskflow`). Keep it **Public** (required for free GitHub Pages).
-3. Do **not** initialize it with a README, `.gitignore`, or license.
+លោកអ្នកមិនចាំបាច់សរសេរ Command អ្វីទាំងអស់! ដើម្បីធ្វើបច្ចុប្បន្នភាពកូដទៅកាន់ GitHub៖
 
-### Step 2: Push Your Code to GitHub
-Open your terminal in the project directory and run the following commands to initialize Git and push the project to your new repository:
+1. **ចុចលើប៊ូតុង Publish / Export:**
+   - នៅជ្រុងខាងលើស្តាំនៃផ្ទាំង Google AI Studio សូមចុចលើប៊ូតុង **"Publish"** ឬ **"Settings"** (រូបសញ្ញាចុចបី `...`)។
+   - ជ្រើសរើសយក **"Export to GitHub"** (ឬ **"Push to GitHub"** / **"Sync with GitHub"** អាស្រ័យលើកំណែ AI Studio)។
+2. **ជ្រើសរើស Repository របស់អ្នក:**
+   - ជ្រើសរើស Repository ដែលលោកអ្នកចង់ Push កូដចូល។
+3. **ប្រព័ន្ធ GitHub Actions នឹងដំណើរការ Hosting ដោយស្វ័យប្រវត្តិ:**
+   - យើងបានកំណត់ឯកសារ `.github/workflows/deploy.yml` និង `base: './'` រួចជាស្រេច។ រាល់ពេលលោកអ្នក Push ទៅ GitHub នោះ GitHub នឹង Compile ហើយបង្ហោះ (Deploy) ឡើងលើ **GitHub Pages** ដោយស្វ័យប្រវត្តិ ១០០%!
+
+---
+
+## 🛠️ ការបើកដំណើរការ GitHub Pages លើ GitHub Repository (ធ្វើតែម្តងដំបូងប៉ុណ្ណោះ)
+
+1. ចូលទៅកាន់ Repository របស់អ្នកនៅលើ GitHub
+2. ចុចលើ **Settings** > ម៉ឺនុយ **Pages** (នៅខាងឆ្វេង)
+3. នៅត្រង់ **Build and deployment > Source**:
+   - ជ្រើសរើសយក **"GitHub Actions"** (ឬ **"Deploy from a branch: gh-pages"**)
+4. រួចរាល់! គេហទំព័ររបស់អ្នកនឹងមានតំណភ្ជាប់ Live ដូចជា៖ `https://<YOUR_USERNAME>.github.io/<YOUR_REPO>/`
+
+---
+
+## 💻 របៀបរុញកូដតាម Terminal (បើទាញយកជា ZIP)
 
 ```bash
 # Initialize git repository
