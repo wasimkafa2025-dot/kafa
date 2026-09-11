@@ -364,7 +364,7 @@ async function startServer() {
   });
 
   // Safe Server-Side Google Sheets Proxy
-  const DEFAULT_SHEETS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyx__UhJ9vOS0s_WvSlhRLgS6FxKPJEHPnBZMqm4I2dzaeQGayV7FIBTbIvpOlbLu-8yg/exec";
+  const DEFAULT_SHEETS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw7ZftkEvhPqDKRfpxSPcl8lAq-BdkIdPGvx8yVe7FwXgNwbMnfswQlOnK4o_1xlxykgg/exec";
   app.post("/api/sheets/sync", async (req, res) => {
     try {
       const { url, payload } = req.body;

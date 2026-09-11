@@ -411,7 +411,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onRefresh
               <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 text-slate-200 text-xs space-y-2 font-mono">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                   <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">
-                    Google Apps Script (doPost with Auto-Delete)
+                    Google Apps Script v3.0 (Smart Column Mapping & Professional Auto-Fit)
                   </span>
                   <button
                     type="button"
@@ -426,7 +426,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onRefresh
                   {RECOMMENDED_APPS_SCRIPT_CODE}
                 </pre>
                 <p className="text-[9px] text-slate-400 font-sans leading-normal pt-1 border-t border-slate-800">
-                  💡 <b>ណែនាំ៖</b> សូមចម្លងកូដនេះទៅដាក់ក្នុង <b>script.google.com</b> របស់លោកអ្នក រួចចុច <b>Deploy &gt; Manage deployments &gt; Edit &gt; New version</b> ដើម្បីធានាថា Google Sheet របស់លោកអ្នកមានមុខងារលុបជួរដេកតាម ID ស្វ័យប្រវត្តិ។
+                  💡 <b>ណែនាំ៖</b> សូមចម្លងកូដថ្មី v3.0 នេះទៅដាក់ជំនួសកូដចាស់ក្នុង <b>script.google.com</b> រួចចុច <b>Deploy &gt; Manage deployments &gt; Edit &gt; New version</b>។ បន្ទាប់មក លោកអ្នកអាចចុច Run លើ function <b>setupProfessionalSheet</b> ដើម្បីរៀបចំ Header ពណ៌ Navy &amp; Gold, កំណត់ទទឹង Column ស្មើស្អាត និង Dropdown ស្វ័យប្រវត្តិ!
                 </p>
               </div>
             )}
