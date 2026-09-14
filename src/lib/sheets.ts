@@ -1,6 +1,6 @@
 import { Task } from '../types';
 
-export const DEFAULT_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbw7ZftkEvhPqDKRfpxSPcl8lAq-BdkIdPGvx8yVe7FwXgNwbMnfswQlOnK4o_1xlxykgg/exec';
+export const DEFAULT_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbx16udHQpOdqaMfcb8JGHjw5EXLypzhZu9IPEmkfDZjgg3_Kzt3o2Nom08wZ8vag2hETA/exec';
 
 export function getGoogleSheetsUrl(): string {
   return localStorage.getItem('taskflow_google_sheets_url') || DEFAULT_SHEETS_URL;
@@ -63,6 +63,19 @@ function formatTaskForSheet(task: Partial<Task>, action: string) {
     cleanCreatedAt = `${yyyy}-${mm}-${dd} ${hh}:${min}`;
   }
 
+  // Format Frequency as "Daily", "Monthly", or "Yearly"
+  const rawType = (task.type || 'daily').toLowerCase();
+  let formattedFrequency = 'Daily';
+  if (rawType.includes('month')) {
+    formattedFrequency = 'Monthly';
+  } else if (rawType.includes('year')) {
+    formattedFrequency = 'Yearly';
+  } else {
+    formattedFrequency = 'Daily';
+  }
+
+  const tagsVal = task.tags || '';
+
   return {
     action,
     method: isDelete ? 'delete' : action,
@@ -79,10 +92,14 @@ function formatTaskForSheet(task: Partial<Task>, action: string) {
     month: task.month || (task.date ? task.date.substring(0, 7) : ''),
     priority: task.priority || 'Medium',
     status: isDelete ? 'Deleted' : (task.status || 'Pending'),
-    type: task.type || 'daily',
-    frequency: task.type || 'daily',
-    taskFrequency: task.type || 'daily',
-    tags: task.tags || '',
+    type: formattedFrequency,
+    frequency: formattedFrequency,
+    taskFrequency: formattedFrequency,
+    "Task Frequency": formattedFrequency,
+    tags: tagsVal,
+    tag: tagsVal,
+    "Tags (optional)": tagsVal,
+    "Tages (optional)": tagsVal,
     userId: task.userId || 'Kafa',
     user: task.userId || 'Kafa',
     createdAt: cleanCreatedAt,
@@ -184,6 +201,7 @@ var STANDARD_HEADERS = [
   "Date",
   "Time",
   "Priority",
+  "Tags (optional)",
   "Status",
   "Task Frequency",
   "User",
@@ -243,6 +261,15 @@ function doPost(e) {
       lastCol = STANDARD_HEADERS.length;
     }
 
+    // Auto-correct duplicate "Date" or typo column after Priority into "Tags (optional)"
+    for (var hIdx = 0; hIdx < headers.length; hIdx++) {
+      var hName = String(headers[hIdx] || "").trim().toLowerCase();
+      if (hIdx >= 4 && (hName === "date" || hName === "tages" || hName === "tages (optional)")) {
+        sheet.getRange(1, hIdx + 1).setValue("Tags (optional)");
+        headers[hIdx] = "Tags (optional)";
+      }
+    }
+
     // 2. BATCH SYNC: Clean and rewrite all active tasks with smart columns
     if (action === "batch_sync" && data.tasks && Array.isArray(data.tasks)) {
       // Keep row 1 headers, clear old data rows below
@@ -280,7 +307,16 @@ function doPost(e) {
       }
     }
 
-    // 4. ADD ACTION (Default): Append a new cleanly mapped row
+    // 4. PING / TEST ACTION: Return connection confirmation without adding dummy row
+    if (action === "ping" || data.test) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        message: "Google Sheet service is connected and ready",
+        headers: headers
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 5. ADD ACTION (Default): Append a new cleanly mapped row
     var newRow = mapDataToHeaders(headers, data);
     sheet.appendRow(newRow);
     var addedRowIndex = sheet.getLastRow();
@@ -312,11 +348,36 @@ function mapDataToHeaders(headers, data, existingRow) {
       continue;
     }
 
-    if (h.indexOf("id") !== -1) {
+    // 1. Task Frequency (MUST check BEFORE generic "task" to avoid "task frequency" matching "task")
+    if (h.indexOf("frequency") !== -1 || h.indexOf("freq") !== -1 || h.indexOf("ប្រភេទ") !== -1) {
+      var rawFreq = data.taskFrequency || data["Task Frequency"] || data.frequency || data.type || fallback || "Daily";
+      var formattedFreq = "Daily";
+      if (typeof rawFreq === "string") {
+        var lower = rawFreq.toLowerCase();
+        if (lower.indexOf("month") !== -1) formattedFreq = "Monthly";
+        else if (lower.indexOf("year") !== -1) formattedFreq = "Yearly";
+        else formattedFreq = "Daily";
+      }
+      row.push(formattedFreq);
+    }
+    // 2. Tags (optional) / Tages (optional) / Tag
+    else if (h.indexOf("tag") !== -1 || h.indexOf("tage") !== -1 || h.indexOf("ស្លាក") !== -1) {
+      var tagsVal = data["Tags (optional)"] !== undefined ? data["Tags (optional)"] :
+                    (data["Tages (optional)"] !== undefined ? data["Tages (optional)"] :
+                    (data.tags !== undefined ? data.tags :
+                    (data.tag !== undefined ? data.tag : fallback)));
+      row.push(tagsVal || "");
+    }
+    // 3. ID
+    else if (h === "id" || h.indexOf("id") !== -1) {
       row.push(data.id || data.taskId || fallback);
-    } else if (h.indexOf("task") !== -1 || h.indexOf("title") !== -1 || h.indexOf("កិច្ចការ") !== -1) {
+    }
+    // 4. Task / Title / Name (after frequency has been checked)
+    else if (h.indexOf("task") !== -1 || h.indexOf("title") !== -1 || h.indexOf("name") !== -1 || h.indexOf("កិច្ចការ") !== -1) {
       row.push(data.task || data.title || fallback);
-    } else if (h.indexOf("created") !== -1 || h.indexOf("បង្កើត") !== -1) {
+    }
+    // 5. Created At / Completed At / Date / Time
+    else if (h.indexOf("created") !== -1 || h.indexOf("បង្កើត") !== -1) {
       row.push(data.createdAt || fallback);
     } else if (h.indexOf("completed") !== -1 || h.indexOf("បញ្ចប់") !== -1) {
       row.push(data.completedAt || fallback);
@@ -324,17 +385,24 @@ function mapDataToHeaders(headers, data, existingRow) {
       row.push(data.date || fallback);
     } else if (h.indexOf("time") !== -1 || h.indexOf("ម៉ោង") !== -1 || h.indexOf("ពេល") !== -1) {
       row.push(data.time || fallback);
-    } else if (h.indexOf("priority") !== -1 || h.indexOf("អាទិភាព") !== -1) {
+    }
+    // 6. Priority
+    else if (h.indexOf("priority") !== -1 || h.indexOf("អាទិភាព") !== -1) {
       row.push(data.priority || fallback || "Medium");
-    } else if (h.indexOf("status") !== -1 || h.indexOf("ស្ថានភាព") !== -1) {
+    }
+    // 7. Status
+    else if (h.indexOf("status") !== -1 || h.indexOf("ស្ថានភាព") !== -1) {
       row.push(data.status || fallback || "Pending");
-    } else if (h.indexOf("frequency") !== -1 || h.indexOf("type") !== -1 || h.indexOf("ប្រភេទ") !== -1) {
-      row.push(data.type || data.frequency || data.taskFrequency || fallback || "daily");
-    } else if (h.indexOf("user") !== -1 || h.indexOf("assign") !== -1 || h.indexOf("អ្នក") !== -1) {
+    }
+    // 8. User
+    else if (h.indexOf("user") !== -1 || h.indexOf("assign") !== -1 || h.indexOf("អ្នក") !== -1) {
       row.push(data.userId || data.user || fallback || "Kafa");
-    } else if (h.indexOf("month") !== -1 || h.indexOf("ខែ") !== -1) {
+    }
+    // 9. Month
+    else if (h.indexOf("month") !== -1 || h.indexOf("ខែ") !== -1) {
       row.push(data.month || fallback || "");
-    } else {
+    }
+    else {
       row.push(data[h] !== undefined ? data[h] : fallback);
     }
   }
@@ -352,12 +420,23 @@ function applyRowFormatting(sheet, startRow, numRows, numCols) {
     dataRange.setFontSize(10);
     dataRange.setVerticalAlignment("middle");
 
-    // Task column (Col B / Col 2) wrap text
-    sheet.getRange(startRow, 2, numRows, 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+    // Task column (Col B / Col 2) wrap text & left align
+    sheet.getRange(startRow, 2, numRows, 1)
+      .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP)
+      .setHorizontalAlignment("left");
+
+    // Tags (optional) column (Col F / Col 6) wrap text
+    if (numCols >= 6) {
+      sheet.getRange(startRow, 6, numRows, 1)
+        .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP)
+        .setHorizontalAlignment("center");
+    }
 
     // Center alignment for Date, Time, Priority, Status, Frequency, User, CreatedAt
     for (var col = 3; col <= numCols; col++) {
-      sheet.getRange(startRow, col, numRows, 1).setHorizontalAlignment("center");
+      if (col !== 2) {
+        sheet.getRange(startRow, col, numRows, 1).setHorizontalAlignment("center");
+      }
     }
   } catch (e) {
     // Non-fatal styling error
@@ -372,7 +451,17 @@ function applyRowFormatting(sheet, startRow, numRows, numCols) {
 function setupProfessionalSheet() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   
-  // Set headers in Row 1
+  // Set headers in Row 1:
+  // Col 1 (A): ID
+  // Col 2 (B): Task
+  // Col 3 (C): Date
+  // Col 4 (D): Time
+  // Col 5 (E): Priority
+  // Col 6 (F): Tags (optional)
+  // Col 7 (G): Status
+  // Col 8 (H): Task Frequency
+  // Col 9 (I): User
+  // Col 10 (J): Created At
   var headerRange = sheet.getRange(1, 1, 1, STANDARD_HEADERS.length);
   headerRange.setValues([STANDARD_HEADERS]);
   
@@ -388,38 +477,44 @@ function setupProfessionalSheet() {
   sheet.setFrozenRows(1);
 
   // Set optimal column widths
-  var widths = [110, 340, 115, 90, 110, 115, 125, 100, 155];
+  // Col A(ID): 120, Col B(Task): 320, Col C(Date): 110, Col D(Time): 85, Col E(Priority): 105
+  // Col F(Tags): 160, Col G(Status): 115, Col H(Frequency): 130, Col I(User): 100, Col J(Created): 150
+  var widths = [120, 320, 110, 85, 105, 160, 115, 130, 100, 150];
   for (var i = 0; i < widths.length; i++) {
     sheet.setColumnWidth(i + 1, widths[i]);
   }
 
-  // Priority Dropdown (Column E)
+  // Clear any stray validation on ID, Task, Date, Time, and Tags (optional)
+  sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 100), 4).clearDataValidations();
+  sheet.getRange(2, 6, Math.max(sheet.getMaxRows() - 1, 100), 1).clearDataValidations();
+
+  // Priority Dropdown (Column E - 5)
   var priorityRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(["Urgent", "High", "Medium", "Low"], true)
     .setAllowInvalid(false)
     .build();
   sheet.getRange(2, 5, Math.max(sheet.getMaxRows() - 1, 100), 1).setDataValidation(priorityRule);
 
-  // Status Dropdown (Column F)
+  // Status Dropdown (Column G - 7)
   var statusRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(["Pending", "In Progress", "Completed", "Overdue"], true)
     .setAllowInvalid(false)
     .build();
-  sheet.getRange(2, 6, Math.max(sheet.getMaxRows() - 1, 100), 1).setDataValidation(statusRule);
+  sheet.getRange(2, 7, Math.max(sheet.getMaxRows() - 1, 100), 1).setDataValidation(statusRule);
 
-  // Task Frequency Dropdown (Column G)
+  // Task Frequency Dropdown (Column H - 8) -> Daily, Monthly, Yearly
   var freqRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(["daily", "monthly", "yearly"], true)
+    .requireValueInList(["Daily", "Monthly", "Yearly"], true)
     .setAllowInvalid(false)
     .build();
-  sheet.getRange(2, 7, Math.max(sheet.getMaxRows() - 1, 100), 1).setDataValidation(freqRule);
+  sheet.getRange(2, 8, Math.max(sheet.getMaxRows() - 1, 100), 1).setDataValidation(freqRule);
 
   // Format existing data rows if any
   if (sheet.getLastRow() > 1) {
     applyRowFormatting(sheet, 2, sheet.getLastRow() - 1, STANDARD_HEADERS.length);
   }
 
-  Logger.log("✅ Google Sheet has been successfully set up with professional formatting and column alignment!");
+  Logger.log("✅ Google Sheet has been successfully set up with 'Tags (optional)' in Column F and 'Task Frequency' (Daily, Monthly, Yearly) in Column H!");
 }
 
 function doGet(e) {

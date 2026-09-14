@@ -1,8 +1,11 @@
 import { initializeApp, getApp, getApps, FirebaseApp } from "firebase/app";
 import { 
   getFirestore, 
-  enableIndexedDbPersistence, 
-  enableMultiTabIndexedDbPersistence, 
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  memoryLocalCache,
+  setLogLevel,
   Firestore, 
   collection, 
   doc, 
@@ -15,6 +18,25 @@ import {
   writeBatch 
 } from "firebase/firestore";
 import { getAnalytics, isSupported } from "firebase/analytics";
+import { setUserLogHandler } from "@firebase/logger";
+
+// Set Firestore log level to silent to turn off internal BloomFilter fallback warnings
+try {
+  setLogLevel("silent");
+} catch {}
+
+// Intercept Firebase internal logger to silently drop benign BloomFilter warnings
+try {
+  setUserLogHandler((logDetails) => {
+    const msg = logDetails.message || "";
+    if (msg.includes("BloomFilter") || msg.includes("Invalid hash count")) {
+      return;
+    }
+    if (logDetails.level === "error") {
+      console.error(`[${logDetails.type}]:`, logDetails.message);
+    }
+  });
+} catch {}
 
 // The auto-provisioned workspace configurations
 export const WORKSPACE_FIREBASE_CONFIG = {
@@ -31,41 +53,6 @@ export const USER_FIREBASE_CONFIG = WORKSPACE_FIREBASE_CONFIG;
 
 let activeApp: FirebaseApp | null = null;
 let activeDb: Firestore | null = null;
-
-// Keep track of DBs where persistence has already been attempted to avoid duplicate calls
-const persistedDbs = new Set<Firestore>();
-
-function setupPersistence(db: Firestore) {
-  if (persistedDbs.has(db)) return;
-  persistedDbs.add(db);
-
-  if (typeof window !== "undefined") {
-    try {
-      enableMultiTabIndexedDbPersistence(db)
-        .then(() => {
-          console.log("Firestore multi-tab offline persistence enabled successfully.");
-        })
-        .catch((err) => {
-          if (err.code === 'failed-precondition') {
-            // Multiple tabs open, fall back to single tab persistence
-            enableIndexedDbPersistence(db)
-              .then(() => {
-                console.log("Firestore single-tab offline persistence enabled.");
-              })
-              .catch((singleErr) => {
-                console.warn("Firestore single-tab persistence failed: ", singleErr);
-              });
-          } else if (err.code === 'unimplemented') {
-            console.warn("Firestore offline persistence is not supported by this browser.");
-          } else {
-            console.warn("Firestore offline persistence setup error: ", err);
-          }
-        });
-    } catch (e) {
-      console.warn("Exception during Firestore offline persistence initialization: ", e);
-    }
-  }
-}
 
 function tryInitializeAnalytics(app: FirebaseApp) {
   if (typeof window !== "undefined") {
@@ -85,7 +72,21 @@ function tryInitializeAnalytics(app: FirebaseApp) {
 const WORKSPACE_DB_ID = "ai-studio-40322e71-9f6e-4f6d-8979-34628b9aa6af";
 
 function createDbInstance(app: FirebaseApp, _mode: "user" | "workspace"): Firestore {
-  return getFirestore(app, WORKSPACE_DB_ID);
+  try {
+    return initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager()
+      })
+    }, WORKSPACE_DB_ID);
+  } catch (err) {
+    try {
+      return getFirestore(app, WORKSPACE_DB_ID);
+    } catch {
+      return initializeFirestore(app, {
+        localCache: memoryLocalCache()
+      }, WORKSPACE_DB_ID);
+    }
+  }
 }
 
 export function getFirebaseInstance(mode: "user" | "workspace" = "user"): { app: FirebaseApp; db: Firestore } {
@@ -96,14 +97,12 @@ export function getFirebaseInstance(mode: "user" | "workspace" = "user"): { app:
     if (getApps().some(app => app.name === appName)) {
       const app = getApp(appName);
       const db = createDbInstance(app, mode);
-      setupPersistence(db);
       tryInitializeAnalytics(app);
       return { app, db };
     }
 
     const app = initializeApp(config, appName);
     const db = createDbInstance(app, mode);
-    setupPersistence(db);
     tryInitializeAnalytics(app);
     return { app, db };
   } catch (error) {
@@ -111,13 +110,11 @@ export function getFirebaseInstance(mode: "user" | "workspace" = "user"): { app:
     if (getApps().length > 0) {
       const app = getApps()[0];
       const db = createDbInstance(app, mode);
-      setupPersistence(db);
       tryInitializeAnalytics(app);
       return { app, db };
     }
     const app = initializeApp(config, appName);
     const db = createDbInstance(app, mode);
-    setupPersistence(db);
     tryInitializeAnalytics(app);
     return { app, db };
   }

@@ -426,7 +426,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onRefresh
                   {RECOMMENDED_APPS_SCRIPT_CODE}
                 </pre>
                 <p className="text-[9px] text-slate-400 font-sans leading-normal pt-1 border-t border-slate-800">
-                  💡 <b>ណែនាំ៖</b> សូមចម្លងកូដថ្មី v3.0 នេះទៅដាក់ជំនួសកូដចាស់ក្នុង <b>script.google.com</b> រួចចុច <b>Deploy &gt; Manage deployments &gt; Edit &gt; New version</b>។ បន្ទាប់មក លោកអ្នកអាចចុច Run លើ function <b>setupProfessionalSheet</b> ដើម្បីរៀបចំ Header ពណ៌ Navy &amp; Gold, កំណត់ទទឹង Column ស្មើស្អាត និង Dropdown ស្វ័យប្រវត្តិ!
+                  💡 <b>ណែនាំ៖</b> សូមចម្លងកូដថ្មី v3.1 នេះទៅដាក់ជំនួសកូដចាស់ក្នុង <b>script.google.com</b> រួចចុច <b>Deploy &gt; Manage deployments &gt; Edit &gt; New version</b>។ កូដថ្មីនេះរៀបចំជួរឈរ <b>Tags (optional)</b> បន្ទាប់ពី Priority (Column F) និងជម្រើស <b>Task Frequency</b> (Daily, Monthly, Yearly) ក្នុង Column H ដោយស្វ័យប្រវត្តិ!
                 </p>
               </div>
             )}

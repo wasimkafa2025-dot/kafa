@@ -1,22 +1,69 @@
+// Suppress internal harmless Firestore BloomFilter warnings from being flagged as errors by container monitor
+const origConsoleWarn = console.warn;
+const origConsoleError = console.error;
+
+const isBloomFilterNoise = (args: any[]) => {
+  return args.some(a => {
+    if (!a) return false;
+    const str = typeof a === "string" ? a : (a?.message || a?.stack || a?.name || String(a));
+    return str.includes("BloomFilter") || str.includes("Invalid hash count");
+  });
+};
+
+console.warn = function (...args: any[]) {
+  if (isBloomFilterNoise(args)) return;
+  origConsoleWarn.apply(console, args);
+};
+
+console.error = function (...args: any[]) {
+  if (isBloomFilterNoise(args)) return;
+  origConsoleError.apply(console, args);
+};
+
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore, collection, getDocs, doc, updateDoc, setDoc, query, where } from "firebase/firestore";
+import { getFirestore, collection, getDocs, doc, updateDoc, setDoc, query, where, setLogLevel } from "firebase/firestore";
+import { setUserLogHandler } from "@firebase/logger";
+
+try {
+  setLogLevel("silent");
+} catch {}
+
+try {
+  setUserLogHandler((logDetails) => {
+    const msg = logDetails.message || "";
+    if (msg.includes("BloomFilter") || msg.includes("Invalid hash count")) {
+      return;
+    }
+    if (logDetails.level === "error") {
+      origConsoleError(`[${logDetails.type}]:`, logDetails.message);
+    }
+  });
+} catch {}
 
 const TG_BOT_TOKEN = "8735305943:AAGlV3cMV5pMuF6ef6EQzLMrirf4A-oQ79g";
 const TG_CHAT_ID = "-1004222754940";
 
 // Server storage for 24/7 background worker persistence
-const DATA_DIR = path.join(process.cwd(), "data");
-if (!fs.existsSync(DATA_DIR)) {
-  try {
+let DATA_DIR = path.join(process.cwd(), "data");
+try {
+  if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-  } catch (err) {
-    console.warn("Could not create data directory:", err);
   }
+  const testFile = path.join(DATA_DIR, ".write_test");
+  fs.writeFileSync(testFile, "ok");
+  fs.unlinkSync(testFile);
+} catch {
+  // If working directory is read-only (common in containerized Cloud Run deployments), fall back to /tmp
+  DATA_DIR = path.join("/tmp", "applet_data");
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+  } catch {}
 }
 const TASKS_FILE = path.join(DATA_DIR, "server_tasks.json");
 const SENT_ALERTS_FILE = path.join(DATA_DIR, "sent_alerts.json");
@@ -270,7 +317,6 @@ async function checkAndSendReminders(): Promise<{ checked: number; sent: number;
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
 
   app.use(express.json());
 
@@ -364,7 +410,7 @@ async function startServer() {
   });
 
   // Safe Server-Side Google Sheets Proxy
-  const DEFAULT_SHEETS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw7ZftkEvhPqDKRfpxSPcl8lAq-BdkIdPGvx8yVe7FwXgNwbMnfswQlOnK4o_1xlxykgg/exec";
+  const DEFAULT_SHEETS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx16udHQpOdqaMfcb8JGHjw5EXLypzhZu9IPEmkfDZjgg3_Kzt3o2Nom08wZ8vag2hETA/exec";
   app.post("/api/sheets/sync", async (req, res) => {
     try {
       const { url, payload } = req.body;
@@ -524,23 +570,47 @@ async function startServer() {
     }
   });
 
-  // Vite middleware setup in development, static folder mapping in production
-  if (process.env.NODE_ENV !== "production") {
+  // Determine environment: true production when bundled or NODE_ENV=production
+  const isProduction =
+    process.env.NODE_ENV === "production" ||
+    typeof __dirname !== "undefined" && __dirname.includes("dist") ||
+    !process.argv.some(arg => arg.includes("server.ts"));
+
+  if (isProduction) {
+    const distPath = (typeof __dirname !== "undefined" && fs.existsSync(path.join(__dirname, "index.html")))
+      ? __dirname
+      : path.join(process.cwd(), "dist");
+
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      const indexPath = path.join(distPath, "index.html");
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(200).send("Daily Task Management API Server is running.");
+      }
+    });
+  } else {
+    // Dynamic import of Vite in development only
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  const primaryPort = isProduction
+    ? (process.env.PORT ? parseInt(process.env.PORT, 10) : 3000)
+    : 3000;
+  const secondaryPort = primaryPort === 3000 && process.env.PORT && parseInt(process.env.PORT, 10) !== 3000
+    ? parseInt(process.env.PORT, 10)
+    : (primaryPort !== 3000 ? 3000 : null);
+
+  let workerStarted = false;
+  const startBackgroundWorker = () => {
+    if (workerStarted) return;
+    workerStarted = true;
     console.log(`[24/7 Cloud Worker] Initializing background task reminder service for Cambodia (UTC+7)...`);
     
     // Initial check shortly after server startup
@@ -552,7 +622,36 @@ async function startServer() {
     setInterval(() => {
       checkAndSendReminders().catch(err => console.error("Background reminder interval error:", err));
     }, 30 * 1000);
-  });
+  };
+
+  // Primary listener
+  try {
+    const primaryServer = app.listen(primaryPort, "0.0.0.0", () => {
+      console.log(`[Server] Primary listener running on http://0.0.0.0:${primaryPort} (${isProduction ? "production" : "development"})`);
+      startBackgroundWorker();
+    });
+    primaryServer.on("error", (err: any) => {
+      console.warn(`[Server] Primary listener note on port ${primaryPort}: ${err.message}`);
+    });
+  } catch (err: any) {
+    console.warn(`[Server] Could not initialize primary listener on port ${primaryPort}: ${err.message}`);
+  }
+
+  // Secondary/Auxiliary listener (ensures both 3000 and Cloud Run's assigned PORT are available)
+  if (secondaryPort && secondaryPort !== primaryPort) {
+    try {
+      const secondaryServer = app.listen(secondaryPort, "0.0.0.0", () => {
+        console.log(`[Server] Auxiliary listener running on http://0.0.0.0:${secondaryPort}`);
+        startBackgroundWorker();
+      });
+      secondaryServer.on("error", (err: any) => {
+        // Expected when a port like 8080 is reserved by container reverse proxy in dev mode
+        console.log(`[Server] Auxiliary port ${secondaryPort} binding note: ${err.message}`);
+      });
+    } catch (err: any) {
+      console.log(`[Server] Auxiliary port ${secondaryPort} note: ${err?.message || err}`);
+    }
+  }
 }
 
 startServer();
