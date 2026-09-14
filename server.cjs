@@ -167,6 +167,11 @@ function isTaskDueTomorrow(dateStr) {
   }
   return false;
 }
+function isTaskDueToday(dateStr) {
+  if (!dateStr) return false;
+  const todayCambodia = getCambodiaDateStr(0);
+  return dateStr === todayCambodia;
+}
 function escapeHtml(str) {
   if (!str) return "";
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -197,6 +202,38 @@ Hello Mr. Kafa, this is your 1-day advance reminder for tomorrow's scheduled tas
 
 \u{1F4CB} <b>Title:</b> ${formattedTitle}
 \u{1F4C5} <b>Tomorrow's Date:</b> <code>${task.date || "--"}</code>
+\u{1F552} <b>Scheduled Time:</b> <code>${task.time || "--:--"}</code>
+\u26A1 <b>Priority:</b> ${statusText}
+
+Thank you!`;
+  }
+}
+function buildTodayReminderMessage(task) {
+  const isKhmer = /[\u1780-\u17FF]/.test(task.task);
+  const priorityEmoji = task.priority === "High" ? "\u{1F534}" : task.priority === "Medium" ? "\u{1F7E1}" : "\u{1F7E2}";
+  const safeTaskTitle = escapeHtml(task.task || "Untitled Task");
+  const formattedTitle = `<i>${safeTaskTitle}</i>`;
+  if (isKhmer) {
+    const priorityKh = task.priority === "High" ? "\u1794\u1793\u17D2\u1791\u17B6\u1793\u17CB" : task.priority === "Medium" ? "\u1798\u1792\u17D2\u1799\u1798" : "\u1798\u17B7\u1793\u179F\u17BC\u179C\u1794\u1793\u17D2\u1791\u17B6\u1793\u17CB";
+    const statusText = `${priorityEmoji} <b>${priorityKh}</b>`;
+    return `<b>\u23F0 \u179F\u17C1\u1785\u1780\u17D2\u178F\u17B8\u179A\u17C6\u179B\u17B9\u1780\u1796\u17B8\u1780\u17B6\u179A\u1784\u17B6\u179A\u178A\u17C2\u179B\u178F\u17D2\u179A\u17BC\u179C\u1794\u17C6\u1796\u17C1\u1789 (\u1790\u17D2\u1784\u17C3\u1793\u17C1\u17C7 / Today)</b>
+
+\u179F\u17BD\u179F\u17D2\u178F\u17B8\u179B\u17C4\u1780 \u1780\u17B6\u17A0\u17D2\u179C\u17B6, \u1793\u17C1\u17C7\u1787\u17B6\u1780\u17B6\u179A\u179A\u17C6\u179B\u17B9\u1780\u1780\u17B7\u1785\u17D2\u1785\u1780\u17B6\u179A\u178A\u17C2\u179B\u178F\u17D2\u179A\u17BC\u179C\u1794\u17C6\u1796\u17C1\u1789\u1793\u17C5\u1790\u17D2\u1784\u17C3\u1793\u17C1\u17C7 (\u1795\u17D2\u1789\u17BE\u179F\u17D2\u179C\u17D0\u1799\u1794\u17D2\u179A\u179C\u178F\u17D2\u178F\u17B7\u178F\u17B6\u1798\u1794\u17D2\u179A\u1796\u17D0\u1793\u17D2\u1792 24/7 Cloud Background Worker)\u17D6
+
+\u{1F4CB} <b>\u1794\u17D2\u179A\u1792\u17B6\u1793\u1794\u1791\u17D6</b> ${formattedTitle}
+\u{1F4C5} <b>\u1780\u17B6\u179B\u1794\u179A\u17B7\u1785\u17D2\u1786\u17C1\u1791\u17D6</b> <code>${task.date || "--"}</code>
+\u{1F552} <b>\u1796\u17C1\u179B\u179C\u17C1\u179B\u17B6\u1780\u17C6\u178E\u178F\u17CB\u17D6</b> <code>${task.time || "--:--"}</code>
+\u26A1 <b>\u1780\u1798\u17D2\u179A\u17B7\u178F\u17A2\u17B6\u1791\u17B7\u1797\u17B6\u1796\u17D6</b> ${statusText}
+
+\u179F\u17BC\u1798\u17A2\u179A\u1782\u17BB\u178E!`;
+  } else {
+    const statusText = `${priorityEmoji} <b>${task.priority || "Medium"}</b>`;
+    return `<b>\u23F0 TASK DUE TODAY REMINDER</b>
+
+Hello Mr. Kafa, this is your reminder for today's scheduled task (24/7 Cloud Background Worker):
+
+\u{1F4CB} <b>Title:</b> ${formattedTitle}
+\u{1F4C5} <b>Date:</b> <code>${task.date || "--"}</code>
 \u{1F552} <b>Scheduled Time:</b> <code>${task.time || "--:--"}</code>
 \u26A1 <b>Priority:</b> ${statusText}
 
@@ -263,35 +300,70 @@ async function checkAndSendReminders() {
     if (t.status === "Pending" && t.date) {
       if (isTaskDueTomorrow(t.date)) {
         const alertKey = `tg_alert_${t.id}_${t.date}`;
-        if (sentAlertsMemory.has(alertKey) || t.telegramNotified) {
-          continue;
+        if (!sentAlertsMemory.has(alertKey) && !t.telegramNotified) {
+          console.log(`[24/7 Worker] Found task due tomorrow (${t.date}): "${t.task}" (ID: ${t.id}). Dispatching Telegram 1-day reminder...`);
+          const messageText = buildReminderMessage(t);
+          const sent = await sendTelegramRaw(messageText);
+          if (sent) {
+            sentAlertsMemory.add(alertKey);
+            saveSentAlerts(sentAlertsMemory);
+            sentCount++;
+            sentTitles.push(`${t.task} (Tomorrow)`);
+            t.telegramNotified = true;
+            taskMap.set(t.id, t);
+            if (db) {
+              try {
+                const taskRef = (0, import_firestore.doc)(db, "tasks", t.id);
+                await (0, import_firestore.updateDoc)(taskRef, { telegramNotified: true }).catch(() => {
+                });
+                const alertLockRef = (0, import_firestore.doc)(db, "telegram_sent_alerts", alertKey);
+                await (0, import_firestore.setDoc)(alertLockRef, {
+                  sent: true,
+                  sentAt: (/* @__PURE__ */ new Date()).toISOString(),
+                  taskId: t.id,
+                  taskTitle: t.task,
+                  type: "one_day_before",
+                  source: "server_24_7_worker"
+                }).catch(() => {
+                });
+              } catch (err) {
+                console.warn("Could not update Firestore notification flag:", err);
+              }
+            }
+          }
         }
-        console.log(`[24/7 Worker] Found task due tomorrow (${t.date}): "${t.task}" (ID: ${t.id}). Dispatching Telegram reminder...`);
-        const messageText = buildReminderMessage(t);
-        const sent = await sendTelegramRaw(messageText);
-        if (sent) {
-          sentAlertsMemory.add(alertKey);
-          saveSentAlerts(sentAlertsMemory);
-          sentCount++;
-          sentTitles.push(t.task);
-          t.telegramNotified = true;
-          taskMap.set(t.id, t);
-          if (db) {
-            try {
-              const taskRef = (0, import_firestore.doc)(db, "tasks", t.id);
-              await (0, import_firestore.updateDoc)(taskRef, { telegramNotified: true }).catch(() => {
-              });
-              const alertLockRef = (0, import_firestore.doc)(db, "telegram_sent_alerts", alertKey);
-              await (0, import_firestore.setDoc)(alertLockRef, {
-                sent: true,
-                sentAt: (/* @__PURE__ */ new Date()).toISOString(),
-                taskId: t.id,
-                taskTitle: t.task,
-                source: "server_24_7_worker"
-              }).catch(() => {
-              });
-            } catch (err) {
-              console.warn("Could not update Firestore notification flag:", err);
+      }
+      if (isTaskDueToday(t.date)) {
+        const alertKeyToday = `tg_alert_today_${t.id}_${t.date}`;
+        if (!sentAlertsMemory.has(alertKeyToday) && !t.telegramTodayNotified) {
+          console.log(`[24/7 Worker] Found task due today (${t.date}): "${t.task}" (ID: ${t.id}). Dispatching Telegram today reminder...`);
+          const messageText = buildTodayReminderMessage(t);
+          const sent = await sendTelegramRaw(messageText);
+          if (sent) {
+            sentAlertsMemory.add(alertKeyToday);
+            saveSentAlerts(sentAlertsMemory);
+            sentCount++;
+            sentTitles.push(`${t.task} (Today)`);
+            t.telegramTodayNotified = true;
+            taskMap.set(t.id, t);
+            if (db) {
+              try {
+                const taskRef = (0, import_firestore.doc)(db, "tasks", t.id);
+                await (0, import_firestore.updateDoc)(taskRef, { telegramTodayNotified: true }).catch(() => {
+                });
+                const alertLockRef = (0, import_firestore.doc)(db, "telegram_sent_alerts", alertKeyToday);
+                await (0, import_firestore.setDoc)(alertLockRef, {
+                  sent: true,
+                  sentAt: (/* @__PURE__ */ new Date()).toISOString(),
+                  taskId: t.id,
+                  taskTitle: t.task,
+                  type: "due_today",
+                  source: "server_24_7_worker"
+                }).catch(() => {
+                });
+              } catch (err) {
+                console.warn("Could not update Firestore today notification flag:", err);
+              }
             }
           }
         }
@@ -339,6 +411,21 @@ async function startServer() {
         sentAlertsMemory.delete(req.body.taskId);
       }
       res.status(500).json({ error: error.message || "Failed to send message" });
+    }
+  });
+  app.post("/api/telegram/test-server", async (req, res) => {
+    try {
+      const cambodiaToday = getCambodiaDateStr(0);
+      const testMsg = `<b>\u{1F514} 24/7 Cloud Background Worker Test</b>
+
+\u2705 Telegram notifications are actively functioning from the server.
+\u{1F4C5} Cambodia Date: <code>${cambodiaToday}</code>
+\u{1F310} Timezone: Asia/Phnom_Penh (UTC+7)
+\u{1F680} Status: Running 24/7 even when browser or device is closed.`;
+      const sent = await sendTelegramRaw(testMsg);
+      res.json({ success: sent });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err?.message || "Failed to send test alert" });
     }
   });
   app.post("/api/tasks/sync", (req, res) => {
