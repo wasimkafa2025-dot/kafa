@@ -25,18 +25,60 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 var import_express = __toESM(require("express"), 1);
 var import_path = __toESM(require("path"), 1);
 var import_fs = __toESM(require("fs"), 1);
-var import_vite = require("vite");
 var import_genai = require("@google/genai");
 var import_app = require("firebase/app");
 var import_firestore = require("firebase/firestore");
+var import_logger = require("@firebase/logger");
+var origConsoleWarn = console.warn;
+var origConsoleError = console.error;
+var isBloomFilterNoise = (args) => {
+  return args.some((a) => {
+    if (!a) return false;
+    const str = typeof a === "string" ? a : a?.message || a?.stack || a?.name || String(a);
+    return str.includes("BloomFilter") || str.includes("Invalid hash count");
+  });
+};
+console.warn = function(...args) {
+  if (isBloomFilterNoise(args)) return;
+  origConsoleWarn.apply(console, args);
+};
+console.error = function(...args) {
+  if (isBloomFilterNoise(args)) return;
+  origConsoleError.apply(console, args);
+};
+try {
+  (0, import_firestore.setLogLevel)("silent");
+} catch {
+}
+try {
+  (0, import_logger.setUserLogHandler)((logDetails) => {
+    const msg = logDetails.message || "";
+    if (msg.includes("BloomFilter") || msg.includes("Invalid hash count")) {
+      return;
+    }
+    if (logDetails.level === "error") {
+      origConsoleError(`[${logDetails.type}]:`, logDetails.message);
+    }
+  });
+} catch {
+}
 var TG_BOT_TOKEN = "8735305943:AAGlV3cMV5pMuF6ef6EQzLMrirf4A-oQ79g";
 var TG_CHAT_ID = "-1004222754940";
 var DATA_DIR = import_path.default.join(process.cwd(), "data");
-if (!import_fs.default.existsSync(DATA_DIR)) {
-  try {
+try {
+  if (!import_fs.default.existsSync(DATA_DIR)) {
     import_fs.default.mkdirSync(DATA_DIR, { recursive: true });
-  } catch (err) {
-    console.warn("Could not create data directory:", err);
+  }
+  const testFile = import_path.default.join(DATA_DIR, ".write_test");
+  import_fs.default.writeFileSync(testFile, "ok");
+  import_fs.default.unlinkSync(testFile);
+} catch {
+  DATA_DIR = import_path.default.join("/tmp", "applet_data");
+  try {
+    if (!import_fs.default.existsSync(DATA_DIR)) {
+      import_fs.default.mkdirSync(DATA_DIR, { recursive: true });
+    }
+  } catch {
   }
 }
 var TASKS_FILE = import_path.default.join(DATA_DIR, "server_tasks.json");
@@ -264,7 +306,6 @@ async function checkAndSendReminders() {
 }
 async function startServer() {
   const app = (0, import_express.default)();
-  const PORT = 3e3;
   app.use(import_express.default.json());
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
@@ -340,7 +381,7 @@ async function startServer() {
       res.status(500).json({ success: false, error: err?.message || "Manual check failed" });
     }
   });
-  const DEFAULT_SHEETS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw7ZftkEvhPqDKRfpxSPcl8lAq-BdkIdPGvx8yVe7FwXgNwbMnfswQlOnK4o_1xlxykgg/exec";
+  const DEFAULT_SHEETS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx16udHQpOdqaMfcb8JGHjw5EXLypzhZu9IPEmkfDZjgg3_Kzt3o2Nom08wZ8vag2hETA/exec";
   app.post("/api/sheets/sync", async (req, res) => {
     try {
       const { url, payload } = req.body;
@@ -479,21 +520,32 @@ async function startServer() {
       res.status(500).json({ error: error?.message || "Generative request failed" });
     }
   });
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await (0, import_vite.createServer)({
+  const isProduction = process.env.NODE_ENV === "production" || typeof __dirname !== "undefined" && __dirname.includes("dist") || !process.argv.some((arg) => arg.includes("server.ts"));
+  if (isProduction) {
+    const distPath = typeof __dirname !== "undefined" && import_fs.default.existsSync(import_path.default.join(__dirname, "index.html")) ? __dirname : import_path.default.join(process.cwd(), "dist");
+    app.use(import_express.default.static(distPath));
+    app.get("*", (req, res) => {
+      const indexPath = import_path.default.join(distPath, "index.html");
+      if (import_fs.default.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(200).send("Daily Task Management API Server is running.");
+      }
+    });
+  } else {
+    const { createServer: createViteServer } = await import("vite");
+    const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa"
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = import_path.default.join(process.cwd(), "dist");
-    app.use(import_express.default.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(import_path.default.join(distPath, "index.html"));
-    });
   }
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  const primaryPort = isProduction ? process.env.PORT ? parseInt(process.env.PORT, 10) : 3e3 : 3e3;
+  const secondaryPort = primaryPort === 3e3 && process.env.PORT && parseInt(process.env.PORT, 10) !== 3e3 ? parseInt(process.env.PORT, 10) : primaryPort !== 3e3 ? 3e3 : null;
+  let workerStarted = false;
+  const startBackgroundWorker = () => {
+    if (workerStarted) return;
+    workerStarted = true;
     console.log(`[24/7 Cloud Worker] Initializing background task reminder service for Cambodia (UTC+7)...`);
     setTimeout(() => {
       checkAndSendReminders().catch((err) => console.error("Initial reminder check error:", err));
@@ -501,7 +553,31 @@ async function startServer() {
     setInterval(() => {
       checkAndSendReminders().catch((err) => console.error("Background reminder interval error:", err));
     }, 30 * 1e3);
-  });
+  };
+  try {
+    const primaryServer = app.listen(primaryPort, "0.0.0.0", () => {
+      console.log(`[Server] Primary listener running on http://0.0.0.0:${primaryPort} (${isProduction ? "production" : "development"})`);
+      startBackgroundWorker();
+    });
+    primaryServer.on("error", (err) => {
+      console.warn(`[Server] Primary listener note on port ${primaryPort}: ${err.message}`);
+    });
+  } catch (err) {
+    console.warn(`[Server] Could not initialize primary listener on port ${primaryPort}: ${err.message}`);
+  }
+  if (secondaryPort && secondaryPort !== primaryPort) {
+    try {
+      const secondaryServer = app.listen(secondaryPort, "0.0.0.0", () => {
+        console.log(`[Server] Auxiliary listener running on http://0.0.0.0:${secondaryPort}`);
+        startBackgroundWorker();
+      });
+      secondaryServer.on("error", (err) => {
+        console.log(`[Server] Auxiliary port ${secondaryPort} binding note: ${err.message}`);
+      });
+    } catch (err) {
+      console.log(`[Server] Auxiliary port ${secondaryPort} note: ${err?.message || err}`);
+    }
+  }
 }
 startServer();
 //# sourceMappingURL=server.cjs.map
