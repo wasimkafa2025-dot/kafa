@@ -419,26 +419,30 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
       {/* Grid rendering by viewType */}
       {viewType === 'month' && (
-        <div className="space-y-2">
-          <div className="grid grid-cols-7 gap-1 text-center text-xs font-semibold font-mono text-gray-400 uppercase py-1 border-b border-gray-100 dark:border-gold-500/5">
-            <div>Sun</div>
-            <div>Mon</div>
-            <div>Tue</div>
-            <div>Wed</div>
-            <div>Thu</div>
-            <div>Fri</div>
-            <div>Sat</div>
-          </div>
-          <div className="grid grid-cols-7 gap-1 auto-rows-[90px] md:auto-rows-[110px]">
-            {renderMonthCells()}
+        <div className="overflow-x-auto pb-2 custom-scrollbar">
+          <div className="min-w-[520px] md:min-w-0 space-y-2">
+            <div className="grid grid-cols-7 gap-1 text-center text-xs font-semibold font-mono text-gray-400 uppercase py-1 border-b border-gray-100 dark:border-gold-500/5">
+              <div>Sun</div>
+              <div>Mon</div>
+              <div>Tue</div>
+              <div>Wed</div>
+              <div>Thu</div>
+              <div>Fri</div>
+              <div>Sat</div>
+            </div>
+            <div className="grid grid-cols-7 gap-1 auto-rows-[80px] sm:auto-rows-[90px] md:auto-rows-[110px]">
+              {renderMonthCells()}
+            </div>
           </div>
         </div>
       )}
 
       {viewType === 'week' && (
-        <div className="space-y-2">
-          <div className="grid grid-cols-7 gap-2">
-            {renderWeekCells()}
+        <div className="overflow-x-auto pb-2 custom-scrollbar">
+          <div className="min-w-[520px] md:min-w-0 space-y-2">
+            <div className="grid grid-cols-7 gap-2">
+              {renderWeekCells()}
+            </div>
           </div>
         </div>
       )}

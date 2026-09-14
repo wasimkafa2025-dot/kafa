@@ -47,6 +47,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onRefresh
   } | null>(null);
   const [checkingWorker, setCheckingWorker] = useState(false);
   const [workerFeedback, setWorkerFeedback] = useState<string | null>(null);
+  const [testingTelegram, setTestingTelegram] = useState(false);
+  const [telegramFeedback, setTelegramFeedback] = useState<string | null>(null);
 
   const handleCopyScript = () => {
     navigator.clipboard.writeText(RECOMMENDED_APPS_SCRIPT_CODE);
@@ -77,6 +79,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onRefresh
       setWorkerFeedback(`បរាជ័យ: ${err?.message || 'Error'}`);
     } finally {
       setCheckingWorker(false);
+    }
+  };
+
+  const handleTestTelegramServer = async () => {
+    setTestingTelegram(true);
+    setTelegramFeedback(null);
+    try {
+      const res = await fetch('/api/telegram/test-server', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setTelegramFeedback('✅ សារសាកល្បងត្រូវបានផ្ញើទៅកាន់ Telegram របស់លោក កាហ្វា ដោយជោគជ័យ!');
+      } else {
+        setTelegramFeedback(`❌ បរាជ័យក្នុងការផ្ញើសារ: ${data.error || 'Server error'}`);
+      }
+    } catch (err: any) {
+      setTelegramFeedback(`❌ បរាជ័យ: ${err?.message || 'Error'}`);
+    } finally {
+      setTestingTelegram(false);
     }
   };
 
@@ -182,11 +202,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onRefresh
   };
 
   return (
-    <div className="fixed inset-0 bg-black/55 z-[999] flex items-center justify-center p-4 animate-fade-in">
-      <div className="bg-white dark:bg-[#112240] border border-gray-250 dark:border-gold-500/10 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
+    <div className="fixed inset-0 bg-black/55 z-[999] flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+      <div className="bg-white dark:bg-[#112240] border border-gray-250 dark:border-gold-500/10 rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6 shadow-2xl relative custom-scrollbar">
         <button 
           onClick={onClose} 
-          className="absolute right-4 top-4 text-gray-400 hover:text-gray-600 dark:hover:text-gold-500 cursor-pointer transition-colors"
+          className="absolute right-3 top-3 sm:right-4 sm:top-4 text-gray-400 hover:text-gray-600 dark:hover:text-gold-500 cursor-pointer transition-colors p-1"
         >
           <X className="w-5 h-5" />
         </button>
@@ -497,7 +517,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onRefresh
                 </div>
               )}
 
-              <div className="flex items-center gap-2 pt-1">
+              <div className="flex flex-wrap items-center gap-2 pt-1">
                 <button
                   type="button"
                   onClick={handleTriggerWorkerCheck}
@@ -509,9 +529,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onRefresh
                   ) : (
                     <Send className="w-3.5 h-3.5" />
                   )}
-                  <span>Run Cloud Check Now (ត្រួតពិនិត្យ និងផ្ញើរំលឹកឥឡូវនេះ)</span>
+                  <span>Run Cloud Check Now (ត្រួតពិនិត្យឥឡូវ)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleTestTelegramServer}
+                  disabled={testingTelegram}
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                  title="Send immediate test notification from server to Telegram"
+                >
+                  {testingTelegram ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Bell className="w-3.5 h-3.5" />
+                  )}
+                  <span>Test Telegram Bot (ផ្ញើសារសាកល្បង)</span>
                 </button>
               </div>
+
+              {telegramFeedback && (
+                <div className={`p-2 rounded-lg text-[10px] flex items-center gap-1.5 ${
+                  telegramFeedback.startsWith('✅')
+                    ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-red-500/10 border border-red-500/20 text-red-700 dark:text-red-400'
+                }`}>
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>{telegramFeedback}</span>
+                </div>
+              )}
 
               {workerFeedback && (
                 <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg text-[10px] flex items-center gap-1.5">

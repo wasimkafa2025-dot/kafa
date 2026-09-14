@@ -330,7 +330,7 @@ export const TaskForm: React.FC<TaskFormProps> = ({
 
         {/* Dynamic Month or Date Fields */}
         {selectedType === 'yearly' ? (
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <label className="block text-[11px] font-bold text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wider">TARGET MONTH</label>
               <select 
@@ -359,7 +359,7 @@ export const TaskForm: React.FC<TaskFormProps> = ({
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <label className="block text-[11px] font-bold text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wider">DATE / DEADLINE</label>
               <input 
@@ -387,7 +387,7 @@ export const TaskForm: React.FC<TaskFormProps> = ({
         )}
 
         {selectedType !== 'yearly' && (
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <label className="block text-[11px] font-bold text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wider">SCHEDULED TIME</label>
               <input 
