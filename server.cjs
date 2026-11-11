@@ -169,24 +169,6 @@ function addServerNotification(notif) {
     console.warn("Error adding server notification:", err);
   }
 }
-function getCambodiaDateFromIso(isoStr) {
-  try {
-    const d = new Date(isoStr);
-    if (isNaN(d.getTime())) return "";
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: "Asia/Phnom_Penh",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit"
-    }).formatToParts(d);
-    const year = parts.find((p) => p.type === "year")?.value || "";
-    const month = parts.find((p) => p.type === "month")?.value || "";
-    const day = parts.find((p) => p.type === "day")?.value || "";
-    return `${year}-${month}-${day}`;
-  } catch {
-    return "";
-  }
-}
 function getCambodiaDateStr(offsetDays = 0) {
   const target = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1e3);
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -331,32 +313,6 @@ Hello Mr. Kafa, this is your reminder for today's scheduled task (24/7 Cloud Bac
 \u26A1 <b>Priority:</b> ${statusText}
 
 Thank you!`;
-  }
-}
-function isOneDayPostCompletion(completedAt) {
-  if (!completedAt) return false;
-  try {
-    const completedDate = new Date(completedAt);
-    if (isNaN(completedDate.getTime())) return false;
-    const now = Date.now();
-    const elapsedMs = now - completedDate.getTime();
-    const elapsedHours = elapsedMs / (1e3 * 60 * 60);
-    if (elapsedHours >= 24) return true;
-    const completedCambodia = getCambodiaDateFromIso(completedAt);
-    const todayCambodia = getCambodiaDateStr(0);
-    if (completedCambodia && todayCambodia) {
-      const p1 = completedCambodia.split("-");
-      const p2 = todayCambodia.split("-");
-      if (p1.length === 3 && p2.length === 3) {
-        const d1 = new Date(parseInt(p1[0], 10), parseInt(p1[1], 10) - 1, parseInt(p1[2], 10));
-        const d2 = new Date(parseInt(p2[0], 10), parseInt(p2[1], 10) - 1, parseInt(p2[2], 10));
-        const diffDays = Math.round((d2.getTime() - d1.getTime()) / (24 * 60 * 60 * 1e3));
-        if (diffDays >= 1) return true;
-      }
-    }
-    return false;
-  } catch {
-    return false;
   }
 }
 function buildPostCompletedMessage(task) {
@@ -541,56 +497,33 @@ async function checkAndSendReminders() {
         }
       }
     }
-    if (t.status === "Completed" && t.completedAt) {
-      if (isOneDayPostCompletion(t.completedAt)) {
-        const postAlertKey = `tg_alert_post_comp_1day_${t.id}`;
-        if (!sentAlertsMemory.has(postAlertKey) && !t.telegramPostCompletedNotified) {
-          console.log(`[24/7 Worker] Found completed task with 1-day milestone reached (${t.completedAt}): "${t.task}" (ID: ${t.id}). Dispatching Telegram & System auto-message...`);
-          const messageText = buildPostCompletedMessage(t);
-          const sent = await sendTelegramRaw(messageText);
-          if (sent) {
-            sentAlertsMemory.add(postAlertKey);
-            saveSentAlerts(sentAlertsMemory);
-            sentCount++;
-            sentTitles.push(`${t.task} (Completed +1 Day)`);
-            t.telegramPostCompletedNotified = true;
-            t.systemNotifiedPostCompleted = true;
-            t.isArchived = true;
-            taskMap.set(t.id, t);
-            addServerNotification({
-              id: `notif_post_comp_${t.id}`,
-              taskId: t.id,
-              taskTitle: t.task,
-              type: "post_completed_1day",
-              title: `\u1780\u17B7\u1785\u17D2\u1785\u1780\u17B6\u179A\u1794\u17B6\u1793\u1794\u17C6\u1796\u17C1\u1789\u179A\u17C6\u179B\u1784 \u17E1 \u1790\u17D2\u1784\u17C3\u17D6 ${t.task}`,
-              message: `\u1780\u17B7\u1785\u17D2\u1785\u1780\u17B6\u179A \xAB${t.task}\xBB \u178F\u17D2\u179A\u17BC\u179C\u1794\u17B6\u1793\u17A2\u17D2\u1793\u1780\u1794\u17C6\u1796\u17C1\u1789\u179A\u17BD\u1785\u179A\u17B6\u179B\u17CB\u179A\u17C6\u179B\u1784\u1794\u17B6\u1793 \u17E1 \u1790\u17D2\u1784\u17C3\u17A0\u17BE\u1799\u17D4 \u1794\u17D2\u179A\u1796\u17D0\u1793\u17D2\u1792\u1794\u17B6\u1793\u179A\u1780\u17D2\u179F\u17B6\u1791\u17BB\u1780\u1780\u17D2\u1793\u17BB\u1784\u1780\u1793\u17D2\u179B\u17C2\u1784\u1795\u17D2\u1791\u17BB\u1780\u1780\u17B7\u1785\u17D2\u1785\u1780\u17B6\u179A\u178A\u17C2\u179B\u1794\u17B6\u1793\u1794\u17C6\u1796\u17C1\u1789\u179A\u17BD\u1785 \u1793\u17B7\u1784\u1794\u17B6\u1793\u1795\u17D2\u1789\u17BE\u179F\u17B6\u179A\u17A2\u17BC\u178F\u17BC\u1791\u17C5\u1780\u17B6\u1793\u17CB Telegram \u179A\u17BD\u1785\u179A\u17B6\u179B\u17CB\u17D4`,
-              createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-              read: false
-            });
-            if (db) {
-              try {
-                const taskRef = (0, import_firestore.doc)(db, "tasks", t.id);
-                await (0, import_firestore.updateDoc)(taskRef, {
-                  telegramPostCompletedNotified: true,
-                  systemNotifiedPostCompleted: true,
-                  isArchived: true
-                }).catch(() => {
-                });
-                const alertLockRef = (0, import_firestore.doc)(db, "telegram_sent_alerts", postAlertKey);
-                await (0, import_firestore.setDoc)(alertLockRef, {
-                  sent: true,
-                  sentAt: (/* @__PURE__ */ new Date()).toISOString(),
-                  taskId: t.id,
-                  taskTitle: t.task,
-                  type: "post_completed_1day",
-                  source: "server_24_7_worker"
-                }).catch(() => {
-                });
-              } catch (err) {
-                console.warn("Could not update Firestore post-completion alert flag:", err);
-              }
-            }
-          }
+    const isPastDueOrCompleted = t.status === "Completed" || t.date && (() => {
+      try {
+        const timeStr = t.time || "23:59";
+        const [hours, mins] = timeStr.split(":").map(Number);
+        const [y, m, d] = t.date.split("-").map(Number);
+        const taskTime = new Date(y, m - 1, d, hours || 0, mins || 0, 0);
+        return Date.now() >= taskTime.getTime();
+      } catch {
+        return false;
+      }
+    })();
+    if (isPastDueOrCompleted && !t.isArchived) {
+      t.status = "Completed";
+      t.isArchived = true;
+      if (!t.completedAt) t.completedAt = (/* @__PURE__ */ new Date()).toISOString();
+      taskMap.set(t.id, t);
+      if (db) {
+        try {
+          const taskRef = (0, import_firestore.doc)(db, "tasks", t.id);
+          await (0, import_firestore.updateDoc)(taskRef, {
+            status: "Completed",
+            isArchived: true,
+            completedAt: t.completedAt
+          }).catch(() => {
+          });
+        } catch (err) {
+          console.warn("Could not auto-archive past task in Firestore:", err);
         }
       }
     }
