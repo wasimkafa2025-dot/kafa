@@ -120,7 +120,6 @@ export async function callGeminiProxy(prompt: string, options: { systemInstructi
         const newKey = window.prompt("🔑 Enter your new Gemini API key:");
         if (newKey && newKey.trim()) {
           localStorage.setItem("taskflow_gemini_api_key", newKey.trim());
-          // Retry the function with the new key!
           return callGeminiProxy(prompt, options);
         }
       }

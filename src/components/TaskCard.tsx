@@ -1,6 +1,6 @@
 import React from 'react';
 import { Task } from '../types';
-import { Check, Edit, Trash, Copy, Archive, CheckSquare, Square, Eye, Calendar, Clock } from 'lucide-react';
+import { Check, Edit, Trash, Copy, Archive, CheckSquare, Square, Eye, Calendar, Clock, Bell, Send, CheckCircle2 } from 'lucide-react';
 
 interface TaskCardProps {
   task: Task;
@@ -10,7 +10,8 @@ interface TaskCardProps {
   onDuplicate?: (id: string) => void;
   onArchive?: (id: string) => void;
   onOpenDetails?: (id: string) => void;
-  viewContext?: 'dashboard' | 'tracker' | 'search' | 'daily' | 'monthly' | 'yearly' | 'calendar';
+  onSendPostCompleted?: (id: string) => void;
+  viewContext?: 'dashboard' | 'tracker' | 'search' | 'daily' | 'monthly' | 'yearly' | 'calendar' | 'pending' | 'completed';
 }
 
 export const TaskCard: React.FC<TaskCardProps> = ({
@@ -21,6 +22,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   onDuplicate,
   onArchive,
   onOpenDetails,
+  onSendPostCompleted,
   viewContext = 'tracker'
 }) => {
   const isCompleted = t.status === 'Completed';
@@ -126,7 +128,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
     ? 'text-gray-400 dark:text-gray-500 font-medium line-through underline decoration-gray-400/50 decoration-2' 
     : 'text-gray-800 dark:text-white';
 
-  if (viewContext === 'tracker' || viewContext === 'search' || viewContext === 'daily' || viewContext === 'monthly' || viewContext === 'yearly') {
+  if (viewContext === 'tracker' || viewContext === 'search' || viewContext === 'daily' || viewContext === 'monthly' || viewContext === 'yearly' || viewContext === 'pending' || viewContext === 'completed') {
     let prioBadge = null;
     if (t.priority === 'High') {
       prioBadge = <span className="text-xs font-semibold px-4 py-1.5 rounded-full bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400 border border-red-200/30 dark:border-red-500/10 shrink-0">High</span>;
@@ -134,6 +136,22 @@ export const TaskCard: React.FC<TaskCardProps> = ({
       prioBadge = <span className="text-xs font-semibold px-4 py-1.5 rounded-full bg-[#FEF3C7] text-[#B45309] dark:bg-amber-950/30 dark:text-amber-400 border border-amber-200/30 dark:border-amber-500/10 shrink-0">Medium</span>;
     } else {
       prioBadge = <span className="text-xs font-semibold px-4 py-1.5 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-405 border border-emerald-200/30 dark:border-emerald-500/10 shrink-0">Low</span>;
+    }
+
+    // Format completion date
+    let formattedCompletedAt = null;
+    if (isCompleted && t.completedAt) {
+      try {
+        const cd = new Date(t.completedAt);
+        formattedCompletedAt = cd.toLocaleString('km-KH', {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+      } catch {
+        formattedCompletedAt = t.completedAt;
+      }
     }
 
     return (
@@ -153,7 +171,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                 ? 'bg-emerald-500 border-emerald-500 text-white shadow-xs' 
                 : 'border-gray-300 dark:border-slate-700 hover:border-gold-500 text-transparent hover:bg-gold-500/10'
             }`}
-            title={isCompleted ? "Mark Pending" : "Mark Completed"}
+            title={isCompleted ? "ត្រឡប់ទៅកន្លែងមិនទាន់បំពេញវិញ (Mark Pending)" : "សម្គាល់ថាបានបំពេញ (Mark Completed)"}
           >
             <Check className="w-3.5 h-3.5 stroke-[3]" />
           </button>
@@ -169,6 +187,21 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                 </span>
               )}
               {urgencyIndicator}
+
+              {/* 1-Day Post-Completed Notification Status */}
+              {isCompleted && (
+                t.telegramPostCompletedNotified ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-300/30 shrink-0">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                    <span>បានផ្ញើសារអូតូរំលង ១ ថ្ងៃរួចរាល់</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 px-2 py-0.5 rounded-full border border-amber-300/30 shrink-0">
+                    <Clock className="w-3 h-3 text-amber-600" />
+                    <span>រង់ចាំរំលង ១ ថ្ងៃដើម្បីផ្ញើសារអូតូ</span>
+                  </span>
+                )
+              )}
             </div>
             
             <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500 font-mono mt-1 flex-wrap">
@@ -176,6 +209,16 @@ export const TaskCard: React.FC<TaskCardProps> = ({
               <span>{displayDate}</span>
               <span className="text-amber-500 font-bold">•</span>
               <span className="text-amber-600 dark:text-amber-400 font-medium">{displayTime}</span>
+              
+              {formattedCompletedAt && (
+                <>
+                  <span className="text-emerald-500 font-bold">•</span>
+                  <span className="text-[11px] text-emerald-700 dark:text-emerald-400 font-sans font-semibold">
+                    ✓ បំពេញនៅ៖ {formattedCompletedAt}
+                  </span>
+                </>
+              )}
+
               {t.tags && (
                 <>
                   <span className="text-amber-500 font-bold">•</span>
@@ -183,6 +226,19 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                     {t.tags}
                   </span>
                 </>
+              )}
+
+              {/* Quick Trigger for 1-Day Completed Notification if not sent yet */}
+              {isCompleted && !t.telegramPostCompletedNotified && onSendPostCompleted && (
+                <button
+                  type="button"
+                  onClick={() => onSendPostCompleted(t.id)}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-gold-500 hover:bg-gold-600 text-white text-[10px] font-sans font-bold shadow-xs active:scale-95 transition-all cursor-pointer ml-1"
+                  title="ផ្ញើសារអូតូរំលង ១ ថ្ងៃ ទៅកាន់ Telegram & ប្រព័ន្ធឥឡូវនេះ"
+                >
+                  <Send className="w-2.5 h-2.5" />
+                  <span>ផ្ញើសារអូតូឥឡូវ</span>
+                </button>
               )}
             </div>
           </div>
@@ -285,6 +341,23 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         <div className="flex flex-wrap gap-1">
           {tagChips}
         </div>
+
+        {isCompleted && (
+          <div className="flex items-center justify-between text-[10px] bg-emerald-500/5 dark:bg-emerald-950/20 p-1.5 rounded-lg border border-emerald-500/15">
+            <span className="text-emerald-700 dark:text-emerald-300 font-semibold truncate">
+              {t.completedAt ? `✓ បំពេញ៖ ${new Date(t.completedAt).toLocaleDateString('km-KH', { month: 'numeric', day: 'numeric' })}` : '✓ បំពេញរួច'}
+            </span>
+            {t.telegramPostCompletedNotified ? (
+              <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-0.5">
+                <CheckCircle2 className="w-2.5 h-2.5" /> ផ្ញើសារ ១ ថ្ងៃរួច
+              </span>
+            ) : (
+              <span className="text-amber-600 dark:text-amber-400 font-medium flex items-center gap-0.5">
+                <Clock className="w-2.5 h-2.5" /> រង់ចាំ ១ ថ្ងៃ
+              </span>
+            )}
+          </div>
+        )}
         
         <div className="flex justify-between items-center">
           {t.type === 'yearly' ? (

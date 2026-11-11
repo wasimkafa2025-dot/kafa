@@ -19,36 +19,112 @@ export function getCambodiaDateStr(offsetDays = 0): string {
   return `${year}-${month}-${day}`;
 }
 
-export function isTaskOneDayBefore(dateStr: string): boolean {
-  if (!dateStr) return false;
-  
-  // 1. Check against Cambodia timezone (UTC+7)
-  const tomorrowCambodia = getCambodiaDateStr(1);
-  if (dateStr === tomorrowCambodia) return true;
+/**
+ * Calculates task exact due timestamp in milliseconds with Cambodia (UTC+7) timezone awareness
+ */
+export function getTaskDueTimestamp(dateStr: string, timeStr?: string): number {
+  if (!dateStr) return 0;
+  const time = timeStr && timeStr.includes(':') ? timeStr.trim() : '08:00';
+  const paddedTime = time.length === 5 ? time : time.padStart(5, '0');
+  const isoStr = `${dateStr}T${paddedTime}:00+07:00`;
+  const d = new Date(isoStr);
+  return isNaN(d.getTime()) ? 0 : d.getTime();
+}
 
-  // 2. Check against client local time
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+export interface TaskAlertCheckResult {
+  shouldAlert: boolean;
+  alertType: 'one_day_before' | 'twenty_four_hours' | 'due_today' | null;
+  hoursRemaining: number;
+  isTomorrow: boolean;
+  isToday: boolean;
+  readableRemainingKhmer: string;
+  readableRemainingEnglish: string;
+}
 
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = getLocalDateStr(tomorrow);
-
-  if (dateStr === tomorrowStr) return true;
-
-  const parts = dateStr.split('-');
-  if (parts.length === 3) {
-    const taskYear = parseInt(parts[0], 10);
-    const taskMonth = parseInt(parts[1], 10) - 1;
-    const taskDay = parseInt(parts[2], 10);
-    const taskDate = new Date(taskYear, taskMonth, taskDay);
-    taskDate.setHours(0, 0, 0, 0);
-    const diffMs = taskDate.getTime() - today.getTime();
-    const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
-    return diffDays === 1;
+/**
+ * Checks whether a task qualifies for advance Telegram alert:
+ * 1) 1 ថ្ងៃមុន (Tomorrow in Cambodia UTC+7 calendar date)
+ * 2) ឬ ២៤ ម៉ោងមុនពេលមកដល់នៃភារកិច្ច (Due within 24 hours of arrival)
+ * 3) កិច្ចការថ្ងៃនេះ (Due today before arrival or within 2h grace window)
+ */
+export function checkTaskAdvanceAlert(dateStr: string, timeStr?: string): TaskAlertCheckResult {
+  if (!dateStr) {
+    return {
+      shouldAlert: false,
+      alertType: null,
+      hoursRemaining: 0,
+      isTomorrow: false,
+      isToday: false,
+      readableRemainingKhmer: '',
+      readableRemainingEnglish: ''
+    };
   }
 
-  return false;
+  // Cambodia dates (Asia/Phnom_Penh, UTC+7)
+  const todayCambodia = getCambodiaDateStr(0);
+  const tomorrowCambodia = getCambodiaDateStr(1);
+
+  const isToday = (dateStr === todayCambodia);
+  const isTomorrow = (dateStr === tomorrowCambodia);
+
+  const taskTimeMs = getTaskDueTimestamp(dateStr, timeStr);
+  const nowMs = Date.now();
+  const diffMs = taskTimeMs - nowMs;
+  const hoursRemaining = diffMs / (1000 * 60 * 60);
+
+  // Human-readable remaining time strings
+  let readableRemainingKhmer = '';
+  let readableRemainingEnglish = '';
+  if (hoursRemaining > 24) {
+    const days = Math.round(hoursRemaining / 24);
+    readableRemainingKhmer = `ប្រហែល ${days} ថ្ងៃទៀត`;
+    readableRemainingEnglish = `About ${days} day(s) remaining`;
+  } else if (hoursRemaining > 0) {
+    const hrs = Math.floor(hoursRemaining);
+    const mins = Math.round((hoursRemaining - hrs) * 60);
+    readableRemainingKhmer = hrs > 0 ? `សល់ ${hrs} ម៉ោង ${mins} នាទីទៀត` : `សល់ ${mins} នាទីទៀត`;
+    readableRemainingEnglish = hrs > 0 ? `${hrs}h ${mins}m remaining` : `${mins}m remaining`;
+  } else if (hoursRemaining >= -2) {
+    readableRemainingKhmer = `ដល់ពេលវេលាកំណត់ហើយ`;
+    readableRemainingEnglish = `Due now`;
+  } else {
+    readableRemainingKhmer = `ហួសកាលកំណត់`;
+    readableRemainingEnglish = `Past due`;
+  }
+
+  // Verification conditions:
+  // - 1 ថ្ងៃមុន (Tomorrow's date in Cambodia timezone)
+  // - ឬ ២៤ ម៉ោងមុនពេលមកដល់ (Within 24 hours of task arrival, including up to 2 hours grace if app was just opened)
+  let shouldAlert = false;
+  let alertType: 'one_day_before' | 'twenty_four_hours' | 'due_today' | null = null;
+
+  if (isTomorrow) {
+    shouldAlert = true;
+    alertType = 'one_day_before';
+  } else if (hoursRemaining <= 24 && hoursRemaining >= -2) {
+    shouldAlert = true;
+    alertType = isToday ? 'due_today' : 'twenty_four_hours';
+  } else if (isToday) {
+    // If today and not past due by more than 2 hours
+    shouldAlert = true;
+    alertType = 'due_today';
+  }
+
+  return {
+    shouldAlert,
+    alertType,
+    hoursRemaining,
+    isTomorrow,
+    isToday,
+    readableRemainingKhmer,
+    readableRemainingEnglish
+  };
+}
+
+export function isTaskOneDayBefore(dateStr: string, timeStr?: string): boolean {
+  if (!dateStr) return false;
+  const res = checkTaskAdvanceAlert(dateStr, timeStr);
+  return res.shouldAlert;
 }
 
 export function getMonthNameFromDateStr(dateStr: string): string {

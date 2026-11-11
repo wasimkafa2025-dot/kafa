@@ -67,6 +67,7 @@ try {
 }
 const TASKS_FILE = path.join(DATA_DIR, "server_tasks.json");
 const SENT_ALERTS_FILE = path.join(DATA_DIR, "sent_alerts.json");
+const NOTIFICATIONS_FILE = path.join(DATA_DIR, "system_notifications.json");
 
 // Firebase configuration for server-side access
 const FIREBASE_CONFIG = {
@@ -130,6 +131,58 @@ function saveSentAlerts(alertsSet: Set<string>) {
   }
 }
 
+function loadServerNotifications(): any[] {
+  try {
+    if (fs.existsSync(NOTIFICATIONS_FILE)) {
+      const data = fs.readFileSync(NOTIFICATIONS_FILE, "utf8");
+      const list = JSON.parse(data);
+      if (Array.isArray(list)) return list;
+    }
+  } catch (err) {
+    console.warn("Error reading notifications file:", err);
+  }
+  return [];
+}
+
+function saveServerNotifications(notifs: any[]) {
+  try {
+    fs.writeFileSync(NOTIFICATIONS_FILE, JSON.stringify(notifs, null, 2), "utf8");
+  } catch (err) {
+    console.warn("Error saving notifications file:", err);
+  }
+}
+
+function addServerNotification(notif: any) {
+  try {
+    const list = loadServerNotifications();
+    if (!list.some((n: any) => n.id === notif.id)) {
+      list.unshift(notif);
+      saveServerNotifications(list.slice(0, 100)); // Keep most recent 100
+    }
+  } catch (err) {
+    console.warn("Error adding server notification:", err);
+  }
+}
+
+function getCambodiaDateFromIso(isoStr: string): string {
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return '';
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Phnom_Penh',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).formatToParts(d);
+    const year = parts.find(p => p.type === 'year')?.value || '';
+    const month = parts.find(p => p.type === 'month')?.value || '';
+    const day = parts.find(p => p.type === 'day')?.value || '';
+    return `${year}-${month}-${day}`;
+  } catch {
+    return '';
+  }
+}
+
 function getCambodiaDateStr(offsetDays = 0): string {
   const target = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000);
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -142,6 +195,61 @@ function getCambodiaDateStr(offsetDays = 0): string {
   const month = parts.find(p => p.type === 'month')?.value || '';
   const day = parts.find(p => p.type === 'day')?.value || '';
   return `${year}-${month}-${day}`;
+}
+
+function getTaskDueTimestamp(dateStr: string, timeStr?: string): number {
+  if (!dateStr) return 0;
+  const time = timeStr && timeStr.includes(':') ? timeStr.trim() : '08:00';
+  const paddedTime = time.length === 5 ? time : time.padStart(5, '0');
+  const isoStr = `${dateStr}T${paddedTime}:00+07:00`;
+  const d = new Date(isoStr);
+  return isNaN(d.getTime()) ? 0 : d.getTime();
+}
+
+function checkTaskAdvanceAlert(dateStr: string, timeStr?: string) {
+  if (!dateStr) {
+    return { shouldAlert: false, alertType: null, hoursRemaining: 0, isTomorrow: false, isToday: false, readableRemainingKhmer: '' };
+  }
+
+  const todayCambodia = getCambodiaDateStr(0);
+  const tomorrowCambodia = getCambodiaDateStr(1);
+  const isToday = (dateStr === todayCambodia);
+  const isTomorrow = (dateStr === tomorrowCambodia);
+
+  const taskTimeMs = getTaskDueTimestamp(dateStr, timeStr);
+  const nowMs = Date.now();
+  const diffMs = taskTimeMs - nowMs;
+  const hoursRemaining = diffMs / (1000 * 60 * 60);
+
+  let readableRemainingKhmer = '';
+  if (hoursRemaining > 24) {
+    const days = Math.round(hoursRemaining / 24);
+    readableRemainingKhmer = `ប្រហែល ${days} ថ្ងៃទៀត`;
+  } else if (hoursRemaining > 0) {
+    const hrs = Math.floor(hoursRemaining);
+    const mins = Math.round((hoursRemaining - hrs) * 60);
+    readableRemainingKhmer = hrs > 0 ? `សល់ ${hrs} ម៉ោង ${mins} នាទីទៀត` : `សល់ ${mins} នាទីទៀត`;
+  } else if (hoursRemaining >= -2) {
+    readableRemainingKhmer = `ដល់ពេលវេលាកំណត់ហើយ`;
+  } else {
+    readableRemainingKhmer = `ហួសកាលកំណត់`;
+  }
+
+  let shouldAlert = false;
+  let alertType: 'one_day_before' | 'twenty_four_hours' | 'due_today' | null = null;
+
+  if (isTomorrow) {
+    shouldAlert = true;
+    alertType = 'one_day_before';
+  } else if (hoursRemaining <= 24 && hoursRemaining >= -2) {
+    shouldAlert = true;
+    alertType = isToday ? 'due_today' : 'twenty_four_hours';
+  } else if (isToday) {
+    shouldAlert = true;
+    alertType = 'due_today';
+  }
+
+  return { shouldAlert, alertType, hoursRemaining, isTomorrow, isToday, readableRemainingKhmer };
 }
 
 function isTaskDueTomorrow(dateStr: string): boolean {
@@ -174,7 +282,7 @@ function escapeHtml(str: string): string {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function buildReminderMessage(task: any): string {
+function buildReminderMessage(task: any, remainingText?: string): string {
   const isKhmer = /[\u1780-\u17FF]/.test(task.task);
   const priorityEmoji = task.priority === 'High' ? '🔴' : task.priority === 'Medium' ? '🟡' : '🟢';
   const safeTaskTitle = escapeHtml(task.task || 'Untitled Task');
@@ -183,19 +291,20 @@ function buildReminderMessage(task: any): string {
   if (isKhmer) {
     const priorityKh = task.priority === 'High' ? 'បន្ទាន់' : task.priority === 'Medium' ? 'មធ្យម' : 'មិនសូវបន្ទាន់';
     const statusText = `${priorityEmoji} <b>${priorityKh}</b>`;
-    return `<b>🔔 សេចក្តីរំលឹកពីការងារដែលត្រូវបំពេញ (១ ថ្ងៃមុន)</b>\n\n` +
-           `សួស្តីលោក កាហ្វា, នេះជាការរំលឹក ១ ថ្ងៃមុន សម្រាប់កិច្ចការដែលត្រូវបំពេញនៅថ្ងៃស្អែក (ផ្ញើស្វ័យប្រវត្តិតាមប្រព័ន្ធ 24/7 Cloud Background Worker)៖\n\n` +
+    return `<b>🔔 សេចក្តីរំលឹកពីការងារដែលត្រូវបំពេញ (១ ថ្ងៃមុន / ២៤ ម៉ោងមុន)</b>\n\n` +
+           `សួស្តីលោក កាហ្វា, នេះជាការរំលឹក ១ ថ្ងៃមុន ឬ ២៤ ម៉ោងមុនពេលមកដល់ នៃភារកិច្ចដែលត្រូវបំពេញ (24/7 Cloud Background Worker)៖\n\n` +
            `📋 <b>ប្រធានបទ៖</b> ${formattedTitle}\n` +
-           `📅 <b>ថ្ងៃស្អែក៖</b> <code>${task.date || '--'}</code>\n` +
+           `📅 <b>កាលបរិច្ឆេទ៖</b> <code>${task.date || '--'}</code>\n` +
            `🕒 <b>ពេលវេលា៖</b> <code>${task.time || '--:--'}</code>\n` +
-           `⚡ <b>កម្រិតអាទិភាព៖</b> ${statusText}\n\n` +
+           `⚡ <b>កម្រិតអាទិភាព៖</b> ${statusText}\n` +
+           (remainingText ? `⏳ <b>ពេលវេលានៅសល់៖</b> <code>${remainingText}</code>\n\n` : `\n`) +
            `សូមអរគុណ!`;
   } else {
     const statusText = `${priorityEmoji} <b>${task.priority || 'Medium'}</b>`;
-    return `<b>⏰ 1-DAY ADVANCE TASK REMINDER</b>\n\n` +
-           `Hello Mr. Kafa, this is your 1-day advance reminder for tomorrow's scheduled task (24/7 Cloud Background Worker):\n\n` +
+    return `<b>⏰ 24-HOUR / 1-DAY ADVANCE TASK REMINDER</b>\n\n` +
+           `Hello Mr. Kafa, this is your 24-hour advance reminder for scheduled task (24/7 Cloud Background Worker):\n\n` +
            `📋 <b>Title:</b> ${formattedTitle}\n` +
-           `📅 <b>Tomorrow's Date:</b> <code>${task.date || '--'}</code>\n` +
+           `📅 <b>Date:</b> <code>${task.date || '--'}</code>\n` +
            `🕒 <b>Scheduled Time:</b> <code>${task.time || '--:--'}</code>\n` +
            `⚡ <b>Priority:</b> ${statusText}\n\n` +
            `Thank you!`;
@@ -226,6 +335,85 @@ function buildTodayReminderMessage(task: any): string {
            `📅 <b>Date:</b> <code>${task.date || '--'}</code>\n` +
            `🕒 <b>Scheduled Time:</b> <code>${task.time || '--:--'}</code>\n` +
            `⚡ <b>Priority:</b> ${statusText}\n\n` +
+           `Thank you!`;
+  }
+}
+
+function isOneDayPostCompletion(completedAt?: string | null): boolean {
+  if (!completedAt) return false;
+  try {
+    const completedDate = new Date(completedAt);
+    if (isNaN(completedDate.getTime())) return false;
+    
+    const now = Date.now();
+    const elapsedMs = now - completedDate.getTime();
+    const elapsedHours = elapsedMs / (1000 * 60 * 60);
+
+    // If at least 24 hours have passed since completion
+    if (elapsedHours >= 24) return true;
+
+    // Check calendar day difference in Cambodia timezone (Asia/Phnom_Penh)
+    const completedCambodia = getCambodiaDateFromIso(completedAt);
+    const todayCambodia = getCambodiaDateStr(0);
+
+    if (completedCambodia && todayCambodia) {
+      const p1 = completedCambodia.split('-');
+      const p2 = todayCambodia.split('-');
+      if (p1.length === 3 && p2.length === 3) {
+        const d1 = new Date(parseInt(p1[0], 10), parseInt(p1[1], 10) - 1, parseInt(p1[2], 10));
+        const d2 = new Date(parseInt(p2[0], 10), parseInt(p2[1], 10) - 1, parseInt(p2[2], 10));
+        const diffDays = Math.round((d2.getTime() - d1.getTime()) / (24 * 60 * 60 * 1000));
+        if (diffDays >= 1) return true;
+      }
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function buildPostCompletedMessage(task: any): string {
+  const isKhmer = /[\u1780-\u17FF]/.test(task.task || '');
+  const safeTaskTitle = escapeHtml(task.task || 'Untitled Task');
+  const formattedTitle = `<i>${safeTaskTitle}</i>`;
+
+  let compTimeStr = '--';
+  if (task.completedAt) {
+    try {
+      const d = new Date(task.completedAt);
+      compTimeStr = new Intl.DateTimeFormat('km-KH', {
+        timeZone: 'Asia/Phnom_Penh',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      }).format(d);
+    } catch {
+      compTimeStr = task.completedAt;
+    }
+  }
+
+  const priorityKh = task.priority === 'High' ? '🔴 បន្ទាន់ (High)' : task.priority === 'Medium' ? '🟡 មធ្យម (Medium)' : '🟢 ធម្មតា (Low)';
+
+  if (isKhmer) {
+    return `<b>✅ ការជូនដំណឹង៖ កិច្ចការដែលបានបំពេញរួច (រំលងបាន ១ ថ្ងៃ)</b>\n\n` +
+           `សួស្តីលោក កាហ្វា, កិច្ចការខាងក្រោមត្រូវបានអ្នកបំពេញរួចរាល់រំលងបាន ១ ថ្ងៃហើយ (ផ្ញើស្វ័យប្រវត្តិតាមប្រព័ន្ធ 24/7 Cloud Background Worker)៖\n\n` +
+           `📋 <b>ប្រធានបទ៖</b> ${formattedTitle}\n` +
+           `📅 <b>កាលបរិច្ឆេទបំពេញរួច៖</b> <code>${compTimeStr}</code>\n` +
+           `⚡ <b>កម្រិតអាទិភាព៖</b> ${priorityKh}\n` +
+           `🎉 <b>ស្ថានភាព៖</b> បំពេញរួចរាល់ ១០០% (Completed)\n` +
+           `📂 <b>កន្លែងផ្ទុក៖</b> បានរក្សាទុកដោយឡែកក្នុង «កន្លែងផ្ទុកកិច្ចការដែលបានបំពេញហើយ» (Completed Tasks Repository)\n\n` +
+           `សូមអរគុណ និងសូមជូនពរឱ្យសម្រេចកិច្ចការបន្ទាប់ៗបានកាន់តែរលូន!`;
+  } else {
+    return `<b>✅ COMPLETED TASK FOLLOW-UP (1 Day Post-Completion)</b>\n\n` +
+           `Hello Mr. Kafa, the following task was completed 1 day ago (24/7 Cloud Background Worker):\n\n` +
+           `📋 <b>Title:</b> ${formattedTitle}\n` +
+           `📅 <b>Completed At:</b> <code>${compTimeStr}</code>\n` +
+           `⚡ <b>Priority:</b> ${task.priority || 'Medium'}\n` +
+           `🎉 <b>Status:</b> 100% Completed\n` +
+           `📂 <b>Storage Hub:</b> Stored in Completed Tasks Repository\n\n` +
            `Thank you!`;
   }
 }
@@ -298,37 +486,44 @@ async function checkAndSendReminders(): Promise<{ checked: number; sent: number;
 
   for (const t of allTasks) {
     if (t.status === "Pending" && t.date) {
-      // 1. Advance Reminder: 1 day before task date (due tomorrow)
-      if (isTaskDueTomorrow(t.date)) {
+      const advAlert = checkTaskAdvanceAlert(t.date, t.time);
+
+      // 1. Advance Reminder: 1 day before OR within 24 hours of arrival
+      if (advAlert.shouldAlert && !t.telegramNotified) {
         const alertKey = `tg_alert_${t.id}_${t.date}`;
         
-        if (!sentAlertsMemory.has(alertKey) && !t.telegramNotified) {
-          console.log(`[24/7 Worker] Found task due tomorrow (${t.date}): "${t.task}" (ID: ${t.id}). Dispatching Telegram 1-day reminder...`);
-          const messageText = buildReminderMessage(t);
+        if (!sentAlertsMemory.has(alertKey)) {
+          console.log(`[24/7 Worker] Task due within 24h / tomorrow (${t.date} ${t.time || ''}): "${t.task}" (ID: ${t.id}). Dispatching 24h Telegram reminder...`);
+          const messageText = buildReminderMessage(t, advAlert.readableRemainingKhmer);
           const sent = await sendTelegramRaw(messageText);
 
           if (sent) {
             sentAlertsMemory.add(alertKey);
             saveSentAlerts(sentAlertsMemory);
             sentCount++;
-            sentTitles.push(`${t.task} (Tomorrow)`);
+            sentTitles.push(`${t.task} (${advAlert.isTomorrow ? 'Tomorrow' : '24h Advance'})`);
 
             // Mark in local server tasks
             t.telegramNotified = true;
+            if (advAlert.isToday) t.telegramTodayNotified = true;
             taskMap.set(t.id, t);
 
             // Mark in Firestore
             if (db) {
               try {
                 const taskRef = doc(db, "tasks", t.id);
-                await updateDoc(taskRef, { telegramNotified: true }).catch(() => {});
+                await updateDoc(taskRef, { 
+                  telegramNotified: true,
+                  telegramNotifiedAt: new Date().toISOString(),
+                  ...(advAlert.isToday ? { telegramTodayNotified: true } : {})
+                }).catch(() => {});
                 const alertLockRef = doc(db, "telegram_sent_alerts", alertKey);
                 await setDoc(alertLockRef, {
                   sent: true,
                   sentAt: new Date().toISOString(),
                   taskId: t.id,
                   taskTitle: t.task,
-                  type: "one_day_before",
+                  type: advAlert.alertType || "twenty_four_hours",
                   source: "server_24_7_worker"
                 }).catch(() => {});
               } catch (err) {
@@ -340,10 +535,10 @@ async function checkAndSendReminders(): Promise<{ checked: number; sent: number;
       }
 
       // 2. Same-Day Reminder: Due today
-      if (isTaskDueToday(t.date)) {
+      if (advAlert.isToday && !t.telegramTodayNotified) {
         const alertKeyToday = `tg_alert_today_${t.id}_${t.date}`;
         
-        if (!sentAlertsMemory.has(alertKeyToday) && !t.telegramTodayNotified) {
+        if (!sentAlertsMemory.has(alertKeyToday)) {
           console.log(`[24/7 Worker] Found task due today (${t.date}): "${t.task}" (ID: ${t.id}). Dispatching Telegram today reminder...`);
           const messageText = buildTodayReminderMessage(t);
           const sent = await sendTelegramRaw(messageText);
@@ -374,6 +569,66 @@ async function checkAndSendReminders(): Promise<{ checked: number; sent: number;
                 }).catch(() => {});
               } catch (err) {
                 console.warn("Could not update Firestore today notification flag:", err);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Completed Task 1-Day Post-Completion Auto-Notification (រំលងបាន ១ ថ្ងៃ)
+    if (t.status === "Completed" && t.completedAt) {
+      if (isOneDayPostCompletion(t.completedAt)) {
+        const postAlertKey = `tg_alert_post_comp_1day_${t.id}`;
+        
+        if (!sentAlertsMemory.has(postAlertKey) && !t.telegramPostCompletedNotified) {
+          console.log(`[24/7 Worker] Found completed task with 1-day milestone reached (${t.completedAt}): "${t.task}" (ID: ${t.id}). Dispatching Telegram & System auto-message...`);
+          const messageText = buildPostCompletedMessage(t);
+          const sent = await sendTelegramRaw(messageText);
+
+          if (sent) {
+            sentAlertsMemory.add(postAlertKey);
+            saveSentAlerts(sentAlertsMemory);
+            sentCount++;
+            sentTitles.push(`${t.task} (Completed +1 Day)`);
+
+            // Mark in local server tasks
+            t.telegramPostCompletedNotified = true;
+            t.systemNotifiedPostCompleted = true;
+            taskMap.set(t.id, t);
+
+            // Record system notification on server
+            addServerNotification({
+              id: `notif_post_comp_${t.id}`,
+              taskId: t.id,
+              taskTitle: t.task,
+              type: "post_completed_1day",
+              title: `កិច្ចការបានបំពេញរំលង ១ ថ្ងៃ៖ ${t.task}`,
+              message: `កិច្ចការ «${t.task}» ត្រូវបានអ្នកបំពេញរួចរាល់រំលងបាន ១ ថ្ងៃហើយ។ ប្រព័ន្ធបានរក្សាទុកក្នុងកន្លែងផ្ទុកកិច្ចការដែលបានបំពេញរួច និងបានផ្ញើសារអូតូទៅកាន់ Telegram រួចរាល់។`,
+              createdAt: new Date().toISOString(),
+              read: false
+            });
+
+            // Mark in Firestore
+            if (db) {
+              try {
+                const taskRef = doc(db, "tasks", t.id);
+                await updateDoc(taskRef, {
+                  telegramPostCompletedNotified: true,
+                  systemNotifiedPostCompleted: true
+                }).catch(() => {});
+
+                const alertLockRef = doc(db, "telegram_sent_alerts", postAlertKey);
+                await setDoc(alertLockRef, {
+                  sent: true,
+                  sentAt: new Date().toISOString(),
+                  taskId: t.id,
+                  taskTitle: t.task,
+                  type: "post_completed_1day",
+                  source: "server_24_7_worker"
+                }).catch(() => {});
+              } catch (err) {
+                console.warn("Could not update Firestore post-completion alert flag:", err);
               }
             }
           }
@@ -476,6 +731,8 @@ async function startServer() {
     const cambodiaTomorrow = getCambodiaDateStr(1);
     const tasks = loadServerTasks();
     const pendingDueTomorrow = tasks.filter(t => t.status === "Pending" && isTaskDueTomorrow(t.date));
+    const completedTasks = tasks.filter(t => t.status === "Completed");
+    const completed1DayNotified = completedTasks.filter(t => t.telegramPostCompletedNotified);
 
     res.json({
       active: true,
@@ -485,6 +742,9 @@ async function startServer() {
       cambodiaTomorrow,
       lastCheck: lastWorkerCheckTime,
       monitoredTasksCount: tasks.length,
+      pendingCount: tasks.filter(t => t.status === "Pending").length,
+      completedCount: completedTasks.length,
+      completed1DayNotifiedCount: completed1DayNotified.length,
       pendingDueTomorrowCount: pendingDueTomorrow.length,
       totalRemindersSent: sentAlertsMemory.size
     });
@@ -497,6 +757,106 @@ async function startServer() {
       res.json({ success: true, ...result });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err?.message || "Manual check failed" });
+    }
+  });
+
+  // --- SYSTEM NOTIFICATIONS API ("និង លើប្រព័ន្ធ") ---
+  app.get("/api/notifications", (req, res) => {
+    try {
+      const list = loadServerNotifications();
+      res.json({ success: true, notifications: list });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || "Failed to load notifications" });
+    }
+  });
+
+  app.post("/api/notifications/mark-read", (req, res) => {
+    try {
+      const { id, all } = req.body;
+      let list = loadServerNotifications();
+      if (all) {
+        list = list.map((n: any) => ({ ...n, read: true }));
+      } else if (id) {
+        list = list.map((n: any) => n.id === id ? { ...n, read: true } : n);
+      }
+      saveServerNotifications(list);
+      res.json({ success: true, count: list.length });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || "Failed to mark notifications read" });
+    }
+  });
+
+  app.post("/api/notifications/clear", (req, res) => {
+    try {
+      saveServerNotifications([]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || "Failed to clear notifications" });
+    }
+  });
+
+  // Force-send 1-Day Completed Task Auto-Notification (both Telegram and System) for testing/immediate trigger
+  app.post("/api/telegram/send-post-completed", async (req, res) => {
+    try {
+      const { taskId, task } = req.body;
+      let targetTask = task;
+      if (!targetTask && taskId) {
+        const tasks = loadServerTasks();
+        targetTask = tasks.find((t: any) => t.id === taskId);
+      }
+      if (!targetTask) {
+        res.status(404).json({ success: false, error: "Task not found" });
+        return;
+      }
+
+      const msg = buildPostCompletedMessage(targetTask);
+      const sent = await sendTelegramRaw(msg);
+
+      if (sent) {
+        const postAlertKey = `tg_alert_post_comp_1day_${targetTask.id}`;
+        sentAlertsMemory.add(postAlertKey);
+        saveSentAlerts(sentAlertsMemory);
+
+        // Update task status flag in server cache
+        const tasks = loadServerTasks();
+        const idx = tasks.findIndex((t: any) => t.id === targetTask.id);
+        if (idx >= 0) {
+          tasks[idx].telegramPostCompletedNotified = true;
+          tasks[idx].systemNotifiedPostCompleted = true;
+          saveServerTasks(tasks);
+        }
+
+        // Add to server system notifications
+        addServerNotification({
+          id: `notif_post_comp_${targetTask.id}_${Date.now()}`,
+          taskId: targetTask.id,
+          taskTitle: targetTask.task,
+          type: "post_completed_1day",
+          title: `កិច្ចការបានបំពេញរំលង ១ ថ្ងៃ៖ ${targetTask.task}`,
+          message: `កិច្ចការ «${targetTask.task}» ត្រូវបានអ្នកបំពេញរួចរាល់រំលងបាន ១ ថ្ងៃហើយ។ ប្រព័ន្ធបានរក្សាទុកក្នុងកន្លែងផ្ទុកកិច្ចការដែលបានបំពេញរួច និងបានផ្ញើសារអូតូទៅកាន់ Telegram រួចរាល់។`,
+          createdAt: new Date().toISOString(),
+          read: false
+        });
+
+        // Sync to Firestore if available
+        const db = getServerFirestore();
+        if (db) {
+          try {
+            const taskRef = doc(db, "tasks", targetTask.id);
+            await updateDoc(taskRef, {
+              telegramPostCompletedNotified: true,
+              systemNotifiedPostCompleted: true
+            }).catch(() => {});
+          } catch {}
+        }
+
+        res.json({ success: true, message: "1-Day Completed notification dispatched to Telegram and System" });
+        return;
+      }
+
+      res.status(502).json({ success: false, error: "Telegram dispatch failed" });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || "Failed to trigger post-completed notification" });
     }
   });
 
@@ -577,19 +937,25 @@ async function startServer() {
       // Check header or environment variable for Gemini key
       const clientKey = req.headers["x-gemini-key"] as string;
       const apiKeysToTry: string[] = [];
-      if (clientKey) apiKeysToTry.push(clientKey);
+
+      if (clientKey) {
+        apiKeysToTry.push(clientKey);
+      }
       if (process.env.GEMINI_API_KEY && !apiKeysToTry.includes(process.env.GEMINI_API_KEY)) {
         apiKeysToTry.push(process.env.GEMINI_API_KEY);
       }
 
       if (apiKeysToTry.length === 0) {
         res.status(401).json({
-          error: "Gemini API key is required. Please click the gear icon (⚙️) on the top right to configure your API Key."
+          error: "Gemini API key is required. Please ensure your Gemini API key is configured."
         });
         return;
       }
 
-      const modelsToTry = ["gemini-2.0-flash", "gemini-flash", "gemini-pro"];
+      // Valid, modern Flash model per Google GenAI guidelines
+      const modelsToTry = [
+        "gemini-3.6-flash"
+      ];
       let lastError: any = null;
       let responseText = "";
       let success = false;
@@ -624,12 +990,14 @@ async function startServer() {
           httpOptions: {
             headers: {
               "User-Agent": "aistudio-build"
-            }
+            },
+            timeout: 12000
           }
         });
 
+        let keyDenied = false;
         for (const configAttempt of configAttempts) {
-          if (success) break;
+          if (success || keyDenied) break;
           for (const model of modelsToTry) {
             try {
               const response = await ai.models.generateContent({
@@ -643,8 +1011,14 @@ async function startServer() {
                 break;
               }
             } catch (err: any) {
-              console.warn(`Gemini API error for model ${model}:`, err?.message || err);
+              const errMsg = err?.message || String(err);
+              console.warn(`Gemini API error for model ${model}:`, errMsg);
               lastError = err;
+              // If this key is denied access (403) or invalid (401), stop testing other configs/models for this key
+              if (errMsg.includes("403") || errMsg.includes("denied access") || errMsg.includes("PERMISSION_DENIED") || errMsg.includes("API key not valid")) {
+                keyDenied = true;
+                break;
+              }
             }
           }
         }

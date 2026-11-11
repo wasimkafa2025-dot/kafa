@@ -15,7 +15,22 @@ export interface Task {
   reminderSent?: boolean;
   dueAlerted?: boolean;
   telegramNotified?: boolean;
+  telegramTodayNotified?: boolean;
+  telegramPostCompletedNotified?: boolean;
+  systemNotifiedPostCompleted?: boolean;
   isArchived?: boolean;
+}
+
+export interface SystemNotification {
+  id: string;
+  taskId?: string;
+  taskTitle?: string;
+  type: 'post_completed_1day' | 'due_tomorrow' | 'due_today' | 'general';
+  title: string;
+  message: string;
+  createdAt: string;
+  read: boolean;
+  metadata?: any;
 }
 
 export interface Activity {
