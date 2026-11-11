@@ -468,7 +468,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onRefresh
               <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 text-slate-200 text-xs space-y-2 font-mono">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                   <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">
-                    Google Apps Script v3.0 (Smart Column Mapping & Professional Auto-Fit)
+                    Google Apps Script v4.0 (3 Sheets: Daily, Monthly, Yearly)
                   </span>
                   <button
                     type="button"
@@ -483,7 +483,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onRefresh
                   {RECOMMENDED_APPS_SCRIPT_CODE}
                 </pre>
                 <p className="text-[9px] text-slate-400 font-sans leading-normal pt-1 border-t border-slate-800">
-                  💡 <b>ណែនាំ៖</b> សូមចម្លងកូដថ្មី v3.1 នេះទៅដាក់ជំនួសកូដចាស់ក្នុង <b>script.google.com</b> រួចចុច <b>Deploy &gt; Manage deployments &gt; Edit &gt; New version</b>។ កូដថ្មីនេះរៀបចំជួរឈរ <b>Tags (optional)</b> បន្ទាប់ពី Priority (Column F) និងជម្រើស <b>Task Frequency</b> (Daily, Monthly, Yearly) ក្នុង Column H ដោយស្វ័យប្រវត្តិ!
+                  💡 <b>ណែនាំ៖</b> កូដ v4.0 នេះបែងចែក Sheet ជា ៣ (<b>Daily Tasks</b>, <b>Monthly Tasks</b>, <b>Yearly Tasks</b>) ដោយស្វ័យប្រវត្តិ ព្រមទាំងមាន Columns <b>N (លំដាប់លេខរៀង)</b>, <b>Task (ឈ្មោះភារកិច្ច)</b>, <b>Date</b>, <b>Time</b>, <b>Priority</b>, <b>Status</b>។ សូមចម្លងទៅដាក់ក្នុង <b>script.google.com</b> រួចចុច <b>Run &gt; setupThreeTaskSheets</b> ម្តង រួចចុច <b>Deploy &gt; New deployment</b> (ឬ Manage deployments &gt; New version)!
                 </p>
               </div>
             )}
