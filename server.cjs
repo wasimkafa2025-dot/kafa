@@ -555,6 +555,7 @@ async function checkAndSendReminders() {
             sentTitles.push(`${t.task} (Completed +1 Day)`);
             t.telegramPostCompletedNotified = true;
             t.systemNotifiedPostCompleted = true;
+            t.isArchived = true;
             taskMap.set(t.id, t);
             addServerNotification({
               id: `notif_post_comp_${t.id}`,
@@ -571,7 +572,8 @@ async function checkAndSendReminders() {
                 const taskRef = (0, import_firestore.doc)(db, "tasks", t.id);
                 await (0, import_firestore.updateDoc)(taskRef, {
                   telegramPostCompletedNotified: true,
-                  systemNotifiedPostCompleted: true
+                  systemNotifiedPostCompleted: true,
+                  isArchived: true
                 }).catch(() => {
                 });
                 const alertLockRef = (0, import_firestore.doc)(db, "telegram_sent_alerts", postAlertKey);
