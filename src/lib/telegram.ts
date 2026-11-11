@@ -1,5 +1,5 @@
 export const DEFAULT_TG_BOT_TOKEN = "9094304725:AAEhU0iGMwg1atdgSl-gPq1F7jyMrKZu2zY";
-export const DEFAULT_TG_CHAT_ID = "-1004222754940";
+export const DEFAULT_TG_CHAT_ID = "6536906357";
 
 export function getTelegramConfig(): { botToken: string; chatId: string } {
   if (typeof window !== "undefined") {

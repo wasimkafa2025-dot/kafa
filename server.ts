@@ -45,7 +45,7 @@ try {
 } catch {}
 
 const TG_BOT_TOKEN = "9094304725:AAEhU0iGMwg1atdgSl-gPq1F7jyMrKZu2zY";
-const TG_CHAT_ID = "-1004222754940";
+const TG_CHAT_ID = "6536906357";
 
 // Server storage for 24/7 background worker persistence
 let DATA_DIR = path.join(process.cwd(), "data");
