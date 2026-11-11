@@ -62,7 +62,7 @@ try {
   });
 } catch {
 }
-var TG_BOT_TOKEN = "8735305943:AAGlV3cMV5pMuF6ef6EQzLMrirf4A-oQ79g";
+var TG_BOT_TOKEN = "9094304725:AAEhU0iGMwg1atdgSl-gPq1F7jyMrKZu2zY";
 var TG_CHAT_ID = "-1004222754940";
 var DATA_DIR = import_path.default.join(process.cwd(), "data");
 try {
