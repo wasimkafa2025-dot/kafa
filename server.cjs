@@ -63,7 +63,7 @@ try {
 } catch {
 }
 var TG_BOT_TOKEN = "9094304725:AAEhU0iGMwg1atdgSl-gPq1F7jyMrKZu2zY";
-var TG_CHAT_ID = "-1004222754940";
+var TG_CHAT_ID = "6536906357";
 var DATA_DIR = import_path.default.join(process.cwd(), "data");
 try {
   if (!import_fs.default.existsSync(DATA_DIR)) {
