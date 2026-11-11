@@ -83,6 +83,7 @@ try {
 }
 var TASKS_FILE = import_path.default.join(DATA_DIR, "server_tasks.json");
 var SENT_ALERTS_FILE = import_path.default.join(DATA_DIR, "sent_alerts.json");
+var NOTIFICATIONS_FILE = import_path.default.join(DATA_DIR, "system_notifications.json");
 var FIREBASE_CONFIG = {
   apiKey: "AIzaSyBc4rd74Ibf7nkV3SfTji8EDPChAZTW_LY",
   authDomain: "ai-studio-applet-webapp-313aa.firebaseapp.com",
@@ -138,6 +139,54 @@ function saveSentAlerts(alertsSet) {
     console.warn("Error saving sent alerts file:", err);
   }
 }
+function loadServerNotifications() {
+  try {
+    if (import_fs.default.existsSync(NOTIFICATIONS_FILE)) {
+      const data = import_fs.default.readFileSync(NOTIFICATIONS_FILE, "utf8");
+      const list = JSON.parse(data);
+      if (Array.isArray(list)) return list;
+    }
+  } catch (err) {
+    console.warn("Error reading notifications file:", err);
+  }
+  return [];
+}
+function saveServerNotifications(notifs) {
+  try {
+    import_fs.default.writeFileSync(NOTIFICATIONS_FILE, JSON.stringify(notifs, null, 2), "utf8");
+  } catch (err) {
+    console.warn("Error saving notifications file:", err);
+  }
+}
+function addServerNotification(notif) {
+  try {
+    const list = loadServerNotifications();
+    if (!list.some((n) => n.id === notif.id)) {
+      list.unshift(notif);
+      saveServerNotifications(list.slice(0, 100));
+    }
+  } catch (err) {
+    console.warn("Error adding server notification:", err);
+  }
+}
+function getCambodiaDateFromIso(isoStr) {
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return "";
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Phnom_Penh",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(d);
+    const year = parts.find((p) => p.type === "year")?.value || "";
+    const month = parts.find((p) => p.type === "month")?.value || "";
+    const day = parts.find((p) => p.type === "day")?.value || "";
+    return `${year}-${month}-${day}`;
+  } catch {
+    return "";
+  }
+}
 function getCambodiaDateStr(offsetDays = 0) {
   const target = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1e3);
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -150,6 +199,53 @@ function getCambodiaDateStr(offsetDays = 0) {
   const month = parts.find((p) => p.type === "month")?.value || "";
   const day = parts.find((p) => p.type === "day")?.value || "";
   return `${year}-${month}-${day}`;
+}
+function getTaskDueTimestamp(dateStr, timeStr) {
+  if (!dateStr) return 0;
+  const time = timeStr && timeStr.includes(":") ? timeStr.trim() : "08:00";
+  const paddedTime = time.length === 5 ? time : time.padStart(5, "0");
+  const isoStr = `${dateStr}T${paddedTime}:00+07:00`;
+  const d = new Date(isoStr);
+  return isNaN(d.getTime()) ? 0 : d.getTime();
+}
+function checkTaskAdvanceAlert(dateStr, timeStr) {
+  if (!dateStr) {
+    return { shouldAlert: false, alertType: null, hoursRemaining: 0, isTomorrow: false, isToday: false, readableRemainingKhmer: "" };
+  }
+  const todayCambodia = getCambodiaDateStr(0);
+  const tomorrowCambodia = getCambodiaDateStr(1);
+  const isToday = dateStr === todayCambodia;
+  const isTomorrow = dateStr === tomorrowCambodia;
+  const taskTimeMs = getTaskDueTimestamp(dateStr, timeStr);
+  const nowMs = Date.now();
+  const diffMs = taskTimeMs - nowMs;
+  const hoursRemaining = diffMs / (1e3 * 60 * 60);
+  let readableRemainingKhmer = "";
+  if (hoursRemaining > 24) {
+    const days = Math.round(hoursRemaining / 24);
+    readableRemainingKhmer = `\u1794\u17D2\u179A\u17A0\u17C2\u179B ${days} \u1790\u17D2\u1784\u17C3\u1791\u17C0\u178F`;
+  } else if (hoursRemaining > 0) {
+    const hrs = Math.floor(hoursRemaining);
+    const mins = Math.round((hoursRemaining - hrs) * 60);
+    readableRemainingKhmer = hrs > 0 ? `\u179F\u179B\u17CB ${hrs} \u1798\u17C9\u17C4\u1784 ${mins} \u1793\u17B6\u1791\u17B8\u1791\u17C0\u178F` : `\u179F\u179B\u17CB ${mins} \u1793\u17B6\u1791\u17B8\u1791\u17C0\u178F`;
+  } else if (hoursRemaining >= -2) {
+    readableRemainingKhmer = `\u178A\u179B\u17CB\u1796\u17C1\u179B\u179C\u17C1\u179B\u17B6\u1780\u17C6\u178E\u178F\u17CB\u17A0\u17BE\u1799`;
+  } else {
+    readableRemainingKhmer = `\u17A0\u17BD\u179F\u1780\u17B6\u179B\u1780\u17C6\u178E\u178F\u17CB`;
+  }
+  let shouldAlert = false;
+  let alertType = null;
+  if (isTomorrow) {
+    shouldAlert = true;
+    alertType = "one_day_before";
+  } else if (hoursRemaining <= 24 && hoursRemaining >= -2) {
+    shouldAlert = true;
+    alertType = isToday ? "due_today" : "twenty_four_hours";
+  } else if (isToday) {
+    shouldAlert = true;
+    alertType = "due_today";
+  }
+  return { shouldAlert, alertType, hoursRemaining, isTomorrow, isToday, readableRemainingKhmer };
 }
 function isTaskDueTomorrow(dateStr) {
   if (!dateStr) return false;
@@ -167,16 +263,11 @@ function isTaskDueTomorrow(dateStr) {
   }
   return false;
 }
-function isTaskDueToday(dateStr) {
-  if (!dateStr) return false;
-  const todayCambodia = getCambodiaDateStr(0);
-  return dateStr === todayCambodia;
-}
 function escapeHtml(str) {
   if (!str) return "";
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
-function buildReminderMessage(task) {
+function buildReminderMessage(task, remainingText) {
   const isKhmer = /[\u1780-\u17FF]/.test(task.task);
   const priorityEmoji = task.priority === "High" ? "\u{1F534}" : task.priority === "Medium" ? "\u{1F7E1}" : "\u{1F7E2}";
   const safeTaskTitle = escapeHtml(task.task || "Untitled Task");
@@ -184,24 +275,26 @@ function buildReminderMessage(task) {
   if (isKhmer) {
     const priorityKh = task.priority === "High" ? "\u1794\u1793\u17D2\u1791\u17B6\u1793\u17CB" : task.priority === "Medium" ? "\u1798\u1792\u17D2\u1799\u1798" : "\u1798\u17B7\u1793\u179F\u17BC\u179C\u1794\u1793\u17D2\u1791\u17B6\u1793\u17CB";
     const statusText = `${priorityEmoji} <b>${priorityKh}</b>`;
-    return `<b>\u{1F514} \u179F\u17C1\u1785\u1780\u17D2\u178F\u17B8\u179A\u17C6\u179B\u17B9\u1780\u1796\u17B8\u1780\u17B6\u179A\u1784\u17B6\u179A\u178A\u17C2\u179B\u178F\u17D2\u179A\u17BC\u179C\u1794\u17C6\u1796\u17C1\u1789 (\u17E1 \u1790\u17D2\u1784\u17C3\u1798\u17BB\u1793)</b>
+    return `<b>\u{1F514} \u179F\u17C1\u1785\u1780\u17D2\u178F\u17B8\u179A\u17C6\u179B\u17B9\u1780\u1796\u17B8\u1780\u17B6\u179A\u1784\u17B6\u179A\u178A\u17C2\u179B\u178F\u17D2\u179A\u17BC\u179C\u1794\u17C6\u1796\u17C1\u1789 (\u17E1 \u1790\u17D2\u1784\u17C3\u1798\u17BB\u1793 / \u17E2\u17E4 \u1798\u17C9\u17C4\u1784\u1798\u17BB\u1793)</b>
 
-\u179F\u17BD\u179F\u17D2\u178F\u17B8\u179B\u17C4\u1780 \u1780\u17B6\u17A0\u17D2\u179C\u17B6, \u1793\u17C1\u17C7\u1787\u17B6\u1780\u17B6\u179A\u179A\u17C6\u179B\u17B9\u1780 \u17E1 \u1790\u17D2\u1784\u17C3\u1798\u17BB\u1793 \u179F\u1798\u17D2\u179A\u17B6\u1794\u17CB\u1780\u17B7\u1785\u17D2\u1785\u1780\u17B6\u179A\u178A\u17C2\u179B\u178F\u17D2\u179A\u17BC\u179C\u1794\u17C6\u1796\u17C1\u1789\u1793\u17C5\u1790\u17D2\u1784\u17C3\u179F\u17D2\u17A2\u17C2\u1780 (\u1795\u17D2\u1789\u17BE\u179F\u17D2\u179C\u17D0\u1799\u1794\u17D2\u179A\u179C\u178F\u17D2\u178F\u17B7\u178F\u17B6\u1798\u1794\u17D2\u179A\u1796\u17D0\u1793\u17D2\u1792 24/7 Cloud Background Worker)\u17D6
+\u179F\u17BD\u179F\u17D2\u178F\u17B8\u179B\u17C4\u1780 \u1780\u17B6\u17A0\u17D2\u179C\u17B6, \u1793\u17C1\u17C7\u1787\u17B6\u1780\u17B6\u179A\u179A\u17C6\u179B\u17B9\u1780 \u17E1 \u1790\u17D2\u1784\u17C3\u1798\u17BB\u1793 \u17AC \u17E2\u17E4 \u1798\u17C9\u17C4\u1784\u1798\u17BB\u1793\u1796\u17C1\u179B\u1798\u1780\u178A\u179B\u17CB \u1793\u17C3\u1797\u17B6\u179A\u1780\u17B7\u1785\u17D2\u1785\u178A\u17C2\u179B\u178F\u17D2\u179A\u17BC\u179C\u1794\u17C6\u1796\u17C1\u1789 (24/7 Cloud Background Worker)\u17D6
 
 \u{1F4CB} <b>\u1794\u17D2\u179A\u1792\u17B6\u1793\u1794\u1791\u17D6</b> ${formattedTitle}
-\u{1F4C5} <b>\u1790\u17D2\u1784\u17C3\u179F\u17D2\u17A2\u17C2\u1780\u17D6</b> <code>${task.date || "--"}</code>
+\u{1F4C5} <b>\u1780\u17B6\u179B\u1794\u179A\u17B7\u1785\u17D2\u1786\u17C1\u1791\u17D6</b> <code>${task.date || "--"}</code>
 \u{1F552} <b>\u1796\u17C1\u179B\u179C\u17C1\u179B\u17B6\u17D6</b> <code>${task.time || "--:--"}</code>
 \u26A1 <b>\u1780\u1798\u17D2\u179A\u17B7\u178F\u17A2\u17B6\u1791\u17B7\u1797\u17B6\u1796\u17D6</b> ${statusText}
+` + (remainingText ? `\u23F3 <b>\u1796\u17C1\u179B\u179C\u17C1\u179B\u17B6\u1793\u17C5\u179F\u179B\u17CB\u17D6</b> <code>${remainingText}</code>
 
-\u179F\u17BC\u1798\u17A2\u179A\u1782\u17BB\u178E!`;
+` : `
+`) + `\u179F\u17BC\u1798\u17A2\u179A\u1782\u17BB\u178E!`;
   } else {
     const statusText = `${priorityEmoji} <b>${task.priority || "Medium"}</b>`;
-    return `<b>\u23F0 1-DAY ADVANCE TASK REMINDER</b>
+    return `<b>\u23F0 24-HOUR / 1-DAY ADVANCE TASK REMINDER</b>
 
-Hello Mr. Kafa, this is your 1-day advance reminder for tomorrow's scheduled task (24/7 Cloud Background Worker):
+Hello Mr. Kafa, this is your 24-hour advance reminder for scheduled task (24/7 Cloud Background Worker):
 
 \u{1F4CB} <b>Title:</b> ${formattedTitle}
-\u{1F4C5} <b>Tomorrow's Date:</b> <code>${task.date || "--"}</code>
+\u{1F4C5} <b>Date:</b> <code>${task.date || "--"}</code>
 \u{1F552} <b>Scheduled Time:</b> <code>${task.time || "--:--"}</code>
 \u26A1 <b>Priority:</b> ${statusText}
 
@@ -236,6 +329,79 @@ Hello Mr. Kafa, this is your reminder for today's scheduled task (24/7 Cloud Bac
 \u{1F4C5} <b>Date:</b> <code>${task.date || "--"}</code>
 \u{1F552} <b>Scheduled Time:</b> <code>${task.time || "--:--"}</code>
 \u26A1 <b>Priority:</b> ${statusText}
+
+Thank you!`;
+  }
+}
+function isOneDayPostCompletion(completedAt) {
+  if (!completedAt) return false;
+  try {
+    const completedDate = new Date(completedAt);
+    if (isNaN(completedDate.getTime())) return false;
+    const now = Date.now();
+    const elapsedMs = now - completedDate.getTime();
+    const elapsedHours = elapsedMs / (1e3 * 60 * 60);
+    if (elapsedHours >= 24) return true;
+    const completedCambodia = getCambodiaDateFromIso(completedAt);
+    const todayCambodia = getCambodiaDateStr(0);
+    if (completedCambodia && todayCambodia) {
+      const p1 = completedCambodia.split("-");
+      const p2 = todayCambodia.split("-");
+      if (p1.length === 3 && p2.length === 3) {
+        const d1 = new Date(parseInt(p1[0], 10), parseInt(p1[1], 10) - 1, parseInt(p1[2], 10));
+        const d2 = new Date(parseInt(p2[0], 10), parseInt(p2[1], 10) - 1, parseInt(p2[2], 10));
+        const diffDays = Math.round((d2.getTime() - d1.getTime()) / (24 * 60 * 60 * 1e3));
+        if (diffDays >= 1) return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+function buildPostCompletedMessage(task) {
+  const isKhmer = /[\u1780-\u17FF]/.test(task.task || "");
+  const safeTaskTitle = escapeHtml(task.task || "Untitled Task");
+  const formattedTitle = `<i>${safeTaskTitle}</i>`;
+  let compTimeStr = "--";
+  if (task.completedAt) {
+    try {
+      const d = new Date(task.completedAt);
+      compTimeStr = new Intl.DateTimeFormat("km-KH", {
+        timeZone: "Asia/Phnom_Penh",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      }).format(d);
+    } catch {
+      compTimeStr = task.completedAt;
+    }
+  }
+  const priorityKh = task.priority === "High" ? "\u{1F534} \u1794\u1793\u17D2\u1791\u17B6\u1793\u17CB (High)" : task.priority === "Medium" ? "\u{1F7E1} \u1798\u1792\u17D2\u1799\u1798 (Medium)" : "\u{1F7E2} \u1792\u1798\u17D2\u1798\u178F\u17B6 (Low)";
+  if (isKhmer) {
+    return `<b>\u2705 \u1780\u17B6\u179A\u1787\u17BC\u1793\u178A\u17C6\u178E\u17B9\u1784\u17D6 \u1780\u17B7\u1785\u17D2\u1785\u1780\u17B6\u179A\u178A\u17C2\u179B\u1794\u17B6\u1793\u1794\u17C6\u1796\u17C1\u1789\u179A\u17BD\u1785 (\u179A\u17C6\u179B\u1784\u1794\u17B6\u1793 \u17E1 \u1790\u17D2\u1784\u17C3)</b>
+
+\u179F\u17BD\u179F\u17D2\u178F\u17B8\u179B\u17C4\u1780 \u1780\u17B6\u17A0\u17D2\u179C\u17B6, \u1780\u17B7\u1785\u17D2\u1785\u1780\u17B6\u179A\u1781\u17B6\u1784\u1780\u17D2\u179A\u17C4\u1798\u178F\u17D2\u179A\u17BC\u179C\u1794\u17B6\u1793\u17A2\u17D2\u1793\u1780\u1794\u17C6\u1796\u17C1\u1789\u179A\u17BD\u1785\u179A\u17B6\u179B\u17CB\u179A\u17C6\u179B\u1784\u1794\u17B6\u1793 \u17E1 \u1790\u17D2\u1784\u17C3\u17A0\u17BE\u1799 (\u1795\u17D2\u1789\u17BE\u179F\u17D2\u179C\u17D0\u1799\u1794\u17D2\u179A\u179C\u178F\u17D2\u178F\u17B7\u178F\u17B6\u1798\u1794\u17D2\u179A\u1796\u17D0\u1793\u17D2\u1792 24/7 Cloud Background Worker)\u17D6
+
+\u{1F4CB} <b>\u1794\u17D2\u179A\u1792\u17B6\u1793\u1794\u1791\u17D6</b> ${formattedTitle}
+\u{1F4C5} <b>\u1780\u17B6\u179B\u1794\u179A\u17B7\u1785\u17D2\u1786\u17C1\u1791\u1794\u17C6\u1796\u17C1\u1789\u179A\u17BD\u1785\u17D6</b> <code>${compTimeStr}</code>
+\u26A1 <b>\u1780\u1798\u17D2\u179A\u17B7\u178F\u17A2\u17B6\u1791\u17B7\u1797\u17B6\u1796\u17D6</b> ${priorityKh}
+\u{1F389} <b>\u179F\u17D2\u1790\u17B6\u1793\u1797\u17B6\u1796\u17D6</b> \u1794\u17C6\u1796\u17C1\u1789\u179A\u17BD\u1785\u179A\u17B6\u179B\u17CB \u17E1\u17E0\u17E0% (Completed)
+\u{1F4C2} <b>\u1780\u1793\u17D2\u179B\u17C2\u1784\u1795\u17D2\u1791\u17BB\u1780\u17D6</b> \u1794\u17B6\u1793\u179A\u1780\u17D2\u179F\u17B6\u1791\u17BB\u1780\u178A\u17C4\u1799\u17A1\u17C2\u1780\u1780\u17D2\u1793\u17BB\u1784 \xAB\u1780\u1793\u17D2\u179B\u17C2\u1784\u1795\u17D2\u1791\u17BB\u1780\u1780\u17B7\u1785\u17D2\u1785\u1780\u17B6\u179A\u178A\u17C2\u179B\u1794\u17B6\u1793\u1794\u17C6\u1796\u17C1\u1789\u17A0\u17BE\u1799\xBB (Completed Tasks Repository)
+
+\u179F\u17BC\u1798\u17A2\u179A\u1782\u17BB\u178E \u1793\u17B7\u1784\u179F\u17BC\u1798\u1787\u17BC\u1793\u1796\u179A\u17B1\u17D2\u1799\u179F\u1798\u17D2\u179A\u17C1\u1785\u1780\u17B7\u1785\u17D2\u1785\u1780\u17B6\u179A\u1794\u1793\u17D2\u1791\u17B6\u1794\u17CB\u17D7\u1794\u17B6\u1793\u1780\u17B6\u1793\u17CB\u178F\u17C2\u179A\u179B\u17BC\u1793!`;
+  } else {
+    return `<b>\u2705 COMPLETED TASK FOLLOW-UP (1 Day Post-Completion)</b>
+
+Hello Mr. Kafa, the following task was completed 1 day ago (24/7 Cloud Background Worker):
+
+\u{1F4CB} <b>Title:</b> ${formattedTitle}
+\u{1F4C5} <b>Completed At:</b> <code>${compTimeStr}</code>
+\u26A1 <b>Priority:</b> ${task.priority || "Medium"}
+\u{1F389} <b>Status:</b> 100% Completed
+\u{1F4C2} <b>Storage Hub:</b> Stored in Completed Tasks Repository
 
 Thank you!`;
   }
@@ -298,23 +464,29 @@ async function checkAndSendReminders() {
   const allTasks = Array.from(taskMap.values());
   for (const t of allTasks) {
     if (t.status === "Pending" && t.date) {
-      if (isTaskDueTomorrow(t.date)) {
+      const advAlert = checkTaskAdvanceAlert(t.date, t.time);
+      if (advAlert.shouldAlert && !t.telegramNotified) {
         const alertKey = `tg_alert_${t.id}_${t.date}`;
-        if (!sentAlertsMemory.has(alertKey) && !t.telegramNotified) {
-          console.log(`[24/7 Worker] Found task due tomorrow (${t.date}): "${t.task}" (ID: ${t.id}). Dispatching Telegram 1-day reminder...`);
-          const messageText = buildReminderMessage(t);
+        if (!sentAlertsMemory.has(alertKey)) {
+          console.log(`[24/7 Worker] Task due within 24h / tomorrow (${t.date} ${t.time || ""}): "${t.task}" (ID: ${t.id}). Dispatching 24h Telegram reminder...`);
+          const messageText = buildReminderMessage(t, advAlert.readableRemainingKhmer);
           const sent = await sendTelegramRaw(messageText);
           if (sent) {
             sentAlertsMemory.add(alertKey);
             saveSentAlerts(sentAlertsMemory);
             sentCount++;
-            sentTitles.push(`${t.task} (Tomorrow)`);
+            sentTitles.push(`${t.task} (${advAlert.isTomorrow ? "Tomorrow" : "24h Advance"})`);
             t.telegramNotified = true;
+            if (advAlert.isToday) t.telegramTodayNotified = true;
             taskMap.set(t.id, t);
             if (db) {
               try {
                 const taskRef = (0, import_firestore.doc)(db, "tasks", t.id);
-                await (0, import_firestore.updateDoc)(taskRef, { telegramNotified: true }).catch(() => {
+                await (0, import_firestore.updateDoc)(taskRef, {
+                  telegramNotified: true,
+                  telegramNotifiedAt: (/* @__PURE__ */ new Date()).toISOString(),
+                  ...advAlert.isToday ? { telegramTodayNotified: true } : {}
+                }).catch(() => {
                 });
                 const alertLockRef = (0, import_firestore.doc)(db, "telegram_sent_alerts", alertKey);
                 await (0, import_firestore.setDoc)(alertLockRef, {
@@ -322,7 +494,7 @@ async function checkAndSendReminders() {
                   sentAt: (/* @__PURE__ */ new Date()).toISOString(),
                   taskId: t.id,
                   taskTitle: t.task,
-                  type: "one_day_before",
+                  type: advAlert.alertType || "twenty_four_hours",
                   source: "server_24_7_worker"
                 }).catch(() => {
                 });
@@ -333,9 +505,9 @@ async function checkAndSendReminders() {
           }
         }
       }
-      if (isTaskDueToday(t.date)) {
+      if (advAlert.isToday && !t.telegramTodayNotified) {
         const alertKeyToday = `tg_alert_today_${t.id}_${t.date}`;
-        if (!sentAlertsMemory.has(alertKeyToday) && !t.telegramTodayNotified) {
+        if (!sentAlertsMemory.has(alertKeyToday)) {
           console.log(`[24/7 Worker] Found task due today (${t.date}): "${t.task}" (ID: ${t.id}). Dispatching Telegram today reminder...`);
           const messageText = buildTodayReminderMessage(t);
           const sent = await sendTelegramRaw(messageText);
@@ -363,6 +535,57 @@ async function checkAndSendReminders() {
                 });
               } catch (err) {
                 console.warn("Could not update Firestore today notification flag:", err);
+              }
+            }
+          }
+        }
+      }
+    }
+    if (t.status === "Completed" && t.completedAt) {
+      if (isOneDayPostCompletion(t.completedAt)) {
+        const postAlertKey = `tg_alert_post_comp_1day_${t.id}`;
+        if (!sentAlertsMemory.has(postAlertKey) && !t.telegramPostCompletedNotified) {
+          console.log(`[24/7 Worker] Found completed task with 1-day milestone reached (${t.completedAt}): "${t.task}" (ID: ${t.id}). Dispatching Telegram & System auto-message...`);
+          const messageText = buildPostCompletedMessage(t);
+          const sent = await sendTelegramRaw(messageText);
+          if (sent) {
+            sentAlertsMemory.add(postAlertKey);
+            saveSentAlerts(sentAlertsMemory);
+            sentCount++;
+            sentTitles.push(`${t.task} (Completed +1 Day)`);
+            t.telegramPostCompletedNotified = true;
+            t.systemNotifiedPostCompleted = true;
+            taskMap.set(t.id, t);
+            addServerNotification({
+              id: `notif_post_comp_${t.id}`,
+              taskId: t.id,
+              taskTitle: t.task,
+              type: "post_completed_1day",
+              title: `\u1780\u17B7\u1785\u17D2\u1785\u1780\u17B6\u179A\u1794\u17B6\u1793\u1794\u17C6\u1796\u17C1\u1789\u179A\u17C6\u179B\u1784 \u17E1 \u1790\u17D2\u1784\u17C3\u17D6 ${t.task}`,
+              message: `\u1780\u17B7\u1785\u17D2\u1785\u1780\u17B6\u179A \xAB${t.task}\xBB \u178F\u17D2\u179A\u17BC\u179C\u1794\u17B6\u1793\u17A2\u17D2\u1793\u1780\u1794\u17C6\u1796\u17C1\u1789\u179A\u17BD\u1785\u179A\u17B6\u179B\u17CB\u179A\u17C6\u179B\u1784\u1794\u17B6\u1793 \u17E1 \u1790\u17D2\u1784\u17C3\u17A0\u17BE\u1799\u17D4 \u1794\u17D2\u179A\u1796\u17D0\u1793\u17D2\u1792\u1794\u17B6\u1793\u179A\u1780\u17D2\u179F\u17B6\u1791\u17BB\u1780\u1780\u17D2\u1793\u17BB\u1784\u1780\u1793\u17D2\u179B\u17C2\u1784\u1795\u17D2\u1791\u17BB\u1780\u1780\u17B7\u1785\u17D2\u1785\u1780\u17B6\u179A\u178A\u17C2\u179B\u1794\u17B6\u1793\u1794\u17C6\u1796\u17C1\u1789\u179A\u17BD\u1785 \u1793\u17B7\u1784\u1794\u17B6\u1793\u1795\u17D2\u1789\u17BE\u179F\u17B6\u179A\u17A2\u17BC\u178F\u17BC\u1791\u17C5\u1780\u17B6\u1793\u17CB Telegram \u179A\u17BD\u1785\u179A\u17B6\u179B\u17CB\u17D4`,
+              createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+              read: false
+            });
+            if (db) {
+              try {
+                const taskRef = (0, import_firestore.doc)(db, "tasks", t.id);
+                await (0, import_firestore.updateDoc)(taskRef, {
+                  telegramPostCompletedNotified: true,
+                  systemNotifiedPostCompleted: true
+                }).catch(() => {
+                });
+                const alertLockRef = (0, import_firestore.doc)(db, "telegram_sent_alerts", postAlertKey);
+                await (0, import_firestore.setDoc)(alertLockRef, {
+                  sent: true,
+                  sentAt: (/* @__PURE__ */ new Date()).toISOString(),
+                  taskId: t.id,
+                  taskTitle: t.task,
+                  type: "post_completed_1day",
+                  source: "server_24_7_worker"
+                }).catch(() => {
+                });
+              } catch (err) {
+                console.warn("Could not update Firestore post-completion alert flag:", err);
               }
             }
           }
@@ -448,6 +671,8 @@ async function startServer() {
     const cambodiaTomorrow = getCambodiaDateStr(1);
     const tasks = loadServerTasks();
     const pendingDueTomorrow = tasks.filter((t) => t.status === "Pending" && isTaskDueTomorrow(t.date));
+    const completedTasks = tasks.filter((t) => t.status === "Completed");
+    const completed1DayNotified = completedTasks.filter((t) => t.telegramPostCompletedNotified);
     res.json({
       active: true,
       service: "24/7 Background Telegram Reminder Worker",
@@ -456,6 +681,9 @@ async function startServer() {
       cambodiaTomorrow,
       lastCheck: lastWorkerCheckTime,
       monitoredTasksCount: tasks.length,
+      pendingCount: tasks.filter((t) => t.status === "Pending").length,
+      completedCount: completedTasks.length,
+      completed1DayNotifiedCount: completed1DayNotified.length,
       pendingDueTomorrowCount: pendingDueTomorrow.length,
       totalRemindersSent: sentAlertsMemory.size
     });
@@ -466,6 +694,92 @@ async function startServer() {
       res.json({ success: true, ...result });
     } catch (err) {
       res.status(500).json({ success: false, error: err?.message || "Manual check failed" });
+    }
+  });
+  app.get("/api/notifications", (req, res) => {
+    try {
+      const list = loadServerNotifications();
+      res.json({ success: true, notifications: list });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err?.message || "Failed to load notifications" });
+    }
+  });
+  app.post("/api/notifications/mark-read", (req, res) => {
+    try {
+      const { id, all } = req.body;
+      let list = loadServerNotifications();
+      if (all) {
+        list = list.map((n) => ({ ...n, read: true }));
+      } else if (id) {
+        list = list.map((n) => n.id === id ? { ...n, read: true } : n);
+      }
+      saveServerNotifications(list);
+      res.json({ success: true, count: list.length });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err?.message || "Failed to mark notifications read" });
+    }
+  });
+  app.post("/api/notifications/clear", (req, res) => {
+    try {
+      saveServerNotifications([]);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err?.message || "Failed to clear notifications" });
+    }
+  });
+  app.post("/api/telegram/send-post-completed", async (req, res) => {
+    try {
+      const { taskId, task } = req.body;
+      let targetTask = task;
+      if (!targetTask && taskId) {
+        const tasks = loadServerTasks();
+        targetTask = tasks.find((t) => t.id === taskId);
+      }
+      if (!targetTask) {
+        res.status(404).json({ success: false, error: "Task not found" });
+        return;
+      }
+      const msg = buildPostCompletedMessage(targetTask);
+      const sent = await sendTelegramRaw(msg);
+      if (sent) {
+        const postAlertKey = `tg_alert_post_comp_1day_${targetTask.id}`;
+        sentAlertsMemory.add(postAlertKey);
+        saveSentAlerts(sentAlertsMemory);
+        const tasks = loadServerTasks();
+        const idx = tasks.findIndex((t) => t.id === targetTask.id);
+        if (idx >= 0) {
+          tasks[idx].telegramPostCompletedNotified = true;
+          tasks[idx].systemNotifiedPostCompleted = true;
+          saveServerTasks(tasks);
+        }
+        addServerNotification({
+          id: `notif_post_comp_${targetTask.id}_${Date.now()}`,
+          taskId: targetTask.id,
+          taskTitle: targetTask.task,
+          type: "post_completed_1day",
+          title: `\u1780\u17B7\u1785\u17D2\u1785\u1780\u17B6\u179A\u1794\u17B6\u1793\u1794\u17C6\u1796\u17C1\u1789\u179A\u17C6\u179B\u1784 \u17E1 \u1790\u17D2\u1784\u17C3\u17D6 ${targetTask.task}`,
+          message: `\u1780\u17B7\u1785\u17D2\u1785\u1780\u17B6\u179A \xAB${targetTask.task}\xBB \u178F\u17D2\u179A\u17BC\u179C\u1794\u17B6\u1793\u17A2\u17D2\u1793\u1780\u1794\u17C6\u1796\u17C1\u1789\u179A\u17BD\u1785\u179A\u17B6\u179B\u17CB\u179A\u17C6\u179B\u1784\u1794\u17B6\u1793 \u17E1 \u1790\u17D2\u1784\u17C3\u17A0\u17BE\u1799\u17D4 \u1794\u17D2\u179A\u1796\u17D0\u1793\u17D2\u1792\u1794\u17B6\u1793\u179A\u1780\u17D2\u179F\u17B6\u1791\u17BB\u1780\u1780\u17D2\u1793\u17BB\u1784\u1780\u1793\u17D2\u179B\u17C2\u1784\u1795\u17D2\u1791\u17BB\u1780\u1780\u17B7\u1785\u17D2\u1785\u1780\u17B6\u179A\u178A\u17C2\u179B\u1794\u17B6\u1793\u1794\u17C6\u1796\u17C1\u1789\u179A\u17BD\u1785 \u1793\u17B7\u1784\u1794\u17B6\u1793\u1795\u17D2\u1789\u17BE\u179F\u17B6\u179A\u17A2\u17BC\u178F\u17BC\u1791\u17C5\u1780\u17B6\u1793\u17CB Telegram \u179A\u17BD\u1785\u179A\u17B6\u179B\u17CB\u17D4`,
+          createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+          read: false
+        });
+        const db = getServerFirestore();
+        if (db) {
+          try {
+            const taskRef = (0, import_firestore.doc)(db, "tasks", targetTask.id);
+            await (0, import_firestore.updateDoc)(taskRef, {
+              telegramPostCompletedNotified: true,
+              systemNotifiedPostCompleted: true
+            }).catch(() => {
+            });
+          } catch {
+          }
+        }
+        res.json({ success: true, message: "1-Day Completed notification dispatched to Telegram and System" });
+        return;
+      }
+      res.status(502).json({ success: false, error: "Telegram dispatch failed" });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err?.message || "Failed to trigger post-completed notification" });
     }
   });
   const DEFAULT_SHEETS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx16udHQpOdqaMfcb8JGHjw5EXLypzhZu9IPEmkfDZjgg3_Kzt3o2Nom08wZ8vag2hETA/exec";
@@ -536,17 +850,21 @@ async function startServer() {
       }
       const clientKey = req.headers["x-gemini-key"];
       const apiKeysToTry = [];
-      if (clientKey) apiKeysToTry.push(clientKey);
+      if (clientKey) {
+        apiKeysToTry.push(clientKey);
+      }
       if (process.env.GEMINI_API_KEY && !apiKeysToTry.includes(process.env.GEMINI_API_KEY)) {
         apiKeysToTry.push(process.env.GEMINI_API_KEY);
       }
       if (apiKeysToTry.length === 0) {
         res.status(401).json({
-          error: "Gemini API key is required. Please click the gear icon (\u2699\uFE0F) on the top right to configure your API Key."
+          error: "Gemini API key is required. Please ensure your Gemini API key is configured."
         });
         return;
       }
-      const modelsToTry = ["gemini-2.0-flash", "gemini-flash", "gemini-pro"];
+      const modelsToTry = [
+        "gemini-3.6-flash"
+      ];
       let lastError = null;
       let responseText = "";
       let success = false;
@@ -574,11 +892,13 @@ async function startServer() {
           httpOptions: {
             headers: {
               "User-Agent": "aistudio-build"
-            }
+            },
+            timeout: 12e3
           }
         });
+        let keyDenied = false;
         for (const configAttempt of configAttempts) {
-          if (success) break;
+          if (success || keyDenied) break;
           for (const model of modelsToTry) {
             try {
               const response = await ai.models.generateContent({
@@ -592,8 +912,13 @@ async function startServer() {
                 break;
               }
             } catch (err) {
-              console.warn(`Gemini API error for model ${model}:`, err?.message || err);
+              const errMsg = err?.message || String(err);
+              console.warn(`Gemini API error for model ${model}:`, errMsg);
               lastError = err;
+              if (errMsg.includes("403") || errMsg.includes("denied access") || errMsg.includes("PERMISSION_DENIED") || errMsg.includes("API key not valid")) {
+                keyDenied = true;
+                break;
+              }
             }
           }
         }
