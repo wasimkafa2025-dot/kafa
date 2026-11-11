@@ -782,7 +782,7 @@ async function startServer() {
       res.status(500).json({ success: false, error: err?.message || "Failed to trigger post-completed notification" });
     }
   });
-  const DEFAULT_SHEETS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx16udHQpOdqaMfcb8JGHjw5EXLypzhZu9IPEmkfDZjgg3_Kzt3o2Nom08wZ8vag2hETA/exec";
+  const DEFAULT_SHEETS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxHFlm4VHzj2geAjaAzkaRSxOgbScGDEvqrkpJoq2O_TXHLiUY25J9DLt5UfF8IuP41SA/exec";
   app.post("/api/sheets/sync", async (req, res) => {
     try {
       const { url, payload } = req.body;
