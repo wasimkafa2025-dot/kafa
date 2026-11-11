@@ -2077,48 +2077,6 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
             </button>
 
           </nav>
-
-          <div className="mx-4 my-3 h-px bg-gray-100 dark:bg-gold-500/10"></div>
-
-          {/* Backup utilities block */}
-          <div className="px-4 space-y-1">
-            {/* Hidden but kept in system code per user instruction
-            <button 
-              onClick={() => setShowBackupModal(true)}
-              className="w-full flex items-center gap-3 p-2.5 rounded-xl text-gray-600 hover:bg-gold-500/5 hover:text-[#C59B27] transition-all dark:text-gray-300 cursor-pointer text-xs text-left"
-            >
-              <History className="w-4 h-4 shrink-0 text-[#C59B27]" />
-              {!sidebarCollapsed && <span>Backup timeline</span>}
-            </button>
-            */}
-
-            {/* Export JSON Button */}
-            <button 
-              onClick={handleExportJSON}
-              className="w-full flex items-center gap-3 p-3.5 md:p-2.5 rounded-xl text-gray-600 hover:bg-gold-500/5 hover:text-[#C59B27] transition-all dark:text-gray-300 cursor-pointer text-xs text-left"
-            >
-              <FileDown className="w-4 h-4 shrink-0 text-[#C59B27]" />
-              {!sidebarCollapsed && <span>Export JSON</span>}
-            </button>
-
-            {/* Import JSON Button */}
-            <label 
-              className="w-full flex items-center gap-3 p-3.5 md:p-2.5 rounded-xl text-gray-600 hover:bg-gold-500/5 hover:text-[#C59B27] transition-all dark:text-gray-300 cursor-pointer text-xs text-left"
-            >
-              <FileUp className="w-4 h-4 shrink-0 text-[#C59B27]" />
-              <input 
-                type="file" 
-                accept=".json" 
-                onChange={handleImportJSON} 
-                className="hidden" 
-              />
-              {!sidebarCollapsed && <span>Import JSON</span>}
-            </label>
-
-            {/* Settings & Theme Color modal buttons hidden from left sidebar per user request. Palette remains in header next to Sun/Moon button. */}
-            
-            {/* Keyboard Shortcuts Info Section hidden from UI to declutter, but keyboard shortcuts logic remains active */}
-          </div>
         </div>
 
         {/* Secure Logout Footer */}
