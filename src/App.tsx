@@ -74,7 +74,10 @@ import {
   RefreshCw,
   Send,
   FileSpreadsheet,
-  Palette
+  Palette,
+  FolderCheck,
+  ArchiveRestore,
+  CheckCircle2
 } from 'lucide-react';
 
 function generateUUID() {
@@ -125,10 +128,6 @@ export default function App() {
   const [pendingSearchQuery, setPendingSearchQuery] = useState('');
   const [pendingSortBy, setPendingSortBy] = useState<'smart' | 'date' | 'priority'>('smart');
 
-  const [completedFilterType, setCompletedFilterType] = useState<'all' | 'daily' | 'monthly' | 'yearly'>('all');
-  const [completedSearchQuery, setCompletedSearchQuery] = useState('');
-  const [completedSortBy, setCompletedSortBy] = useState<'date' | 'priority' | 'title'>('date');
-
   // System Notifications & 1-Day Post-Completion Auto Alert States
   const [systemNotifications, setSystemNotifications] = useState<SystemNotification[]>([]);
   const [showNotificationCenter, setShowNotificationCenter] = useState(false);
@@ -172,15 +171,21 @@ export default function App() {
   const [monthlyFilterQuery, setMonthlyFilterQuery] = useState('');
   const [yearlyFilterQuery, setYearlyFilterQuery] = useState('');
 
-  // Specific status filters inside Daily/Monthly/Yearly lists
-  const [dailyStatusFilter, setDailyStatusFilter] = useState<'all' | 'Pending' | 'Completed'>('all');
-  const [monthlyStatusFilter, setMonthlyStatusFilter] = useState<'all' | 'Pending' | 'Completed'>('all');
-  const [yearlyStatusFilter, setYearlyStatusFilter] = useState<'all' | 'Pending' | 'Completed'>('all');
+  // Specific status filters inside Daily/Monthly/Yearly lists (defaults to Pending per user request)
+  const [dailyStatusFilter, setDailyStatusFilter] = useState<'all' | 'Pending' | 'Completed'>('Pending');
+  const [monthlyStatusFilter, setMonthlyStatusFilter] = useState<'all' | 'Pending' | 'Completed'>('Pending');
+  const [yearlyStatusFilter, setYearlyStatusFilter] = useState<'all' | 'Pending' | 'Completed'>('Pending');
 
   // Sorting preferences inside Daily/Monthly/Yearly lists
   const [dailySortBy, setDailySortBy] = useState<'date' | 'priority' | 'status' | 'smart' | 'quick'>('date');
   const [monthlySortBy, setMonthlySortBy] = useState<'date' | 'priority' | 'status' | 'smart' | 'quick'>('date');
   const [yearlySortBy, setYearlySortBy] = useState<'date' | 'priority' | 'status' | 'smart' | 'quick'>('date');
+
+  // Completed Tasks Archive Folder States
+  const [completedFilterQuery, setCompletedFilterQuery] = useState('');
+  const [completedTypeFilter, setCompletedTypeFilter] = useState<'all' | 'daily' | 'monthly' | 'yearly'>('all');
+  const [completedPriorityFilter, setCompletedPriorityFilter] = useState<'all' | 'High' | 'Medium' | 'Low'>('all');
+  const [completedSortBy, setCompletedSortBy] = useState<'completed-desc' | 'completed-asc' | 'date-desc'>('completed-desc');
 
   // AI Productivity Summary
   const [aiSummaryRange, setAiSummaryRange] = useState<'today' | 'week'>('today');
@@ -577,12 +582,15 @@ export default function App() {
 
       const activeList: Task[] = [];
       const archivedList: Task[] = [];
+      const now = Date.now();
+      const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
 
       snapshot.forEach((doc) => {
         const data = doc.data() as Task;
-        // Check if document is archived
-        if (data.status === 'Completed' && (data as any).isArchived) {
-          archivedList.push(data);
+        // Check if document is archived OR completed more than 24 hours ago
+        const isCompletedPast24h = data.status === 'Completed' && data.completedAt && (now - new Date(data.completedAt).getTime() >= TWENTY_FOUR_HOURS);
+        if ((data as any).isArchived || isCompletedPast24h) {
+          archivedList.push({ ...data, isArchived: true, status: 'Completed' });
         } else {
           activeList.push(data);
         }
@@ -614,14 +622,21 @@ export default function App() {
       setArchivedTasks(archivedList);
 
       localStorage.setItem(`taskflow_tasks_${currentUser || 'Kafa'}`, JSON.stringify(activeList));
+      localStorage.setItem(`taskflow_archived_${currentUser || 'Kafa'}`, JSON.stringify(archivedList));
       triggerAutoBackup(activeList, archivedList);
     }, (error) => {
       console.warn("Firestore listener failed, using offline fallback:", error);
       // Fallback seamlessly to localstorage
       const localTasks = localStorage.getItem(`taskflow_tasks_${currentUser || 'Kafa'}`);
+      const localArchived = localStorage.getItem(`taskflow_archived_${currentUser || 'Kafa'}`);
       if (localTasks) {
         try {
           setTasks(JSON.parse(localTasks));
+        } catch (_) {}
+      }
+      if (localArchived) {
+        try {
+          setArchivedTasks(JSON.parse(localArchived));
         } catch (_) {}
       }
     });
@@ -642,6 +657,46 @@ export default function App() {
       }).catch(() => {});
     }
   }, [tasks]);
+
+  // 24-Hour Auto-Archive Effect: Checks periodically for completed tasks reaching 24 hours
+  useEffect(() => {
+    if (!currentUser) return;
+    const checkAutoArchive = () => {
+      const now = Date.now();
+      const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+      
+      const expiredTasks = tasks.filter(t => 
+        t.status === 'Completed' && 
+        t.completedAt && 
+        (now - new Date(t.completedAt).getTime() >= TWENTY_FOUR_HOURS)
+      );
+
+      if (expiredTasks.length > 0) {
+        const expiredIds = new Set(expiredTasks.map(t => t.id));
+        const updatedActive = tasks.filter(t => !expiredIds.has(t.id));
+        const newlyArchived = expiredTasks.map(t => ({ ...t, isArchived: true, status: 'Completed' as const }));
+        const updatedArchived = [...archivedTasks, ...newlyArchived];
+
+        setTasks(updatedActive);
+        setArchivedTasks(updatedArchived);
+        localStorage.setItem(`taskflow_tasks_${currentUser}`, JSON.stringify(updatedActive));
+        localStorage.setItem(`taskflow_archived_${currentUser}`, JSON.stringify(updatedArchived));
+
+        // Sync updates to Firestore & Google Sheets
+        const db = getActiveDb();
+        newlyArchived.forEach(t => {
+          setDoc(doc(db, "tasks", t.id), { ...t, isArchived: true, userId: currentUser }).catch(() => {});
+          syncTaskToGoogleSheet(t, 'archive').catch(() => {});
+        });
+
+        logActivity(`Auto-moved ${expiredTasks.length} completed task(s) to Completed Folder (24h elapsed)`);
+      }
+    };
+
+    checkAutoArchive();
+    const interval = setInterval(checkAutoArchive, 30000);
+    return () => clearInterval(interval);
+  }, [tasks, archivedTasks, currentUser]);
 
   // --- REAL-TIME DUE ALARMS & AUTOMATIC TELEGRAM ALERTS ---
   useEffect(() => {
@@ -1135,6 +1190,7 @@ export default function App() {
     setTasks(updatedTasks);
     setArchivedTasks(updatedArchived);
     localStorage.setItem(`taskflow_tasks_${currentUser}`, JSON.stringify(updatedTasks));
+    localStorage.setItem(`taskflow_archived_${currentUser}`, JSON.stringify(updatedArchived));
 
     try {
       const db = getActiveDb();
@@ -1155,7 +1211,8 @@ export default function App() {
     const updated = {
       ...task,
       isArchived: false,
-      status: 'Pending' as const
+      status: 'Pending' as const,
+      completedAt: null
     };
 
     // Update local states immediately
@@ -1164,6 +1221,7 @@ export default function App() {
     setTasks(updatedTasks);
     setArchivedTasks(updatedArchived);
     localStorage.setItem(`taskflow_tasks_${currentUser}`, JSON.stringify(updatedTasks));
+    localStorage.setItem(`taskflow_archived_${currentUser}`, JSON.stringify(updatedArchived));
 
     try {
       const db = getActiveDb();
@@ -1184,6 +1242,7 @@ export default function App() {
     // Update local archived state immediately
     const updatedArchived = archivedTasks.filter(t => t.id !== id);
     setArchivedTasks(updatedArchived);
+    localStorage.setItem(`taskflow_archived_${currentUser}`, JSON.stringify(updatedArchived));
 
     try {
       const db = getActiveDb();
@@ -1560,8 +1619,17 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
     });
   };
 
+  const isTaskOver24HoursCompleted = (t: Task) => {
+    if (t.isArchived) return true;
+    if (t.status === 'Completed' && t.completedAt) {
+      const time = new Date(t.completedAt).getTime();
+      return !isNaN(time) && (Date.now() - time >= 24 * 60 * 60 * 1000);
+    }
+    return false;
+  };
+
   const getFilteredDaily = () => {
-    let list = tasks.filter(t => t.type === 'daily');
+    let list = tasks.filter(t => t.type === 'daily' && !isTaskOver24HoursCompleted(t));
     if (dailyStatusFilter !== 'all') {
       list = list.filter(t => t.status === dailyStatusFilter);
     }
@@ -1573,7 +1641,7 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
   };
 
   const getFilteredMonthly = () => {
-    let list = tasks.filter(t => t.type === 'monthly');
+    let list = tasks.filter(t => t.type === 'monthly' && !isTaskOver24HoursCompleted(t));
     if (monthlyStatusFilter !== 'all') {
       list = list.filter(t => t.status === monthlyStatusFilter);
     }
@@ -1585,7 +1653,7 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
   };
 
   const getFilteredYearly = () => {
-    let list = tasks.filter(t => t.type === 'yearly');
+    let list = tasks.filter(t => t.type === 'yearly' && !isTaskOver24HoursCompleted(t));
     if (yearlyStatusFilter !== 'all') {
       list = list.filter(t => t.status === yearlyStatusFilter);
     }
@@ -1594,6 +1662,45 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
       list = list.filter(t => t.task.toLowerCase().includes(q) || t.description.toLowerCase().includes(q));
     }
     return sortTasks(list, yearlySortBy);
+  };
+
+  const getFilteredCompleted = () => {
+    let list = [...archivedTasks];
+    
+    if (completedTypeFilter !== 'all') {
+      list = list.filter(t => t.type === completedTypeFilter);
+    }
+    
+    if (completedPriorityFilter !== 'all') {
+      list = list.filter(t => t.priority === completedPriorityFilter);
+    }
+    
+    if (completedFilterQuery.trim()) {
+      const q = completedFilterQuery.toLowerCase().trim();
+      list = list.filter(t => 
+        t.task.toLowerCase().includes(q) || 
+        (t.description && t.description.toLowerCase().includes(q)) ||
+        (t.tags && t.tags.toLowerCase().includes(q))
+      );
+    }
+    
+    list.sort((a, b) => {
+      if (completedSortBy === 'completed-desc') {
+        const timeA = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+        const timeB = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+        return timeB - timeA;
+      } else if (completedSortBy === 'completed-asc') {
+        const timeA = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+        const timeB = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+        return timeA - timeB;
+      } else {
+        const dateA = a.date ? new Date(a.date).getTime() : 0;
+        const dateB = b.date ? new Date(b.date).getTime() : 0;
+        return dateB - dateA;
+      }
+    });
+    
+    return list;
   };
 
   const getFilteredSearchList = () => {
@@ -1943,6 +2050,22 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
             >
               <CalendarIcon className="w-4.5 h-4.5 shrink-0 text-[#C59B27]" />
               {!sidebarCollapsed && <span>Task Calendar</span>}
+            </button>
+
+            <button 
+              onClick={() => { setView('completed-tasks'); setMobileSidebarOpen(false); }}
+              className={`sidebar-item w-full flex items-center justify-between px-4 py-3.5 md:px-3.5 md:py-2.5 rounded-xl cursor-pointer text-left text-xs font-semibold transition-all
+                ${activeView === 'completed-tasks' ? 'active text-emerald-500 bg-emerald-500/10 font-bold' : 'text-gray-600 dark:text-gray-300 hover:text-emerald-500'}`}
+            >
+              <div className="flex items-center gap-3">
+                <FolderCheck className="w-4.5 h-4.5 shrink-0 text-emerald-500" />
+                {!sidebarCollapsed && <span>Completed Tasks</span>}
+              </div>
+              {!sidebarCollapsed && (
+                <span className="text-[10px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-full font-mono font-bold">
+                  {archivedTasks.length}
+                </span>
+              )}
             </button>
 
             <button 
@@ -2373,9 +2496,9 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
                         onChange={(e) => setDailyStatusFilter(e.target.value as any)}
                         className="text-xs bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 dark:text-white rounded-lg px-2.5 py-1.5 focus:outline-none cursor-pointer hover:border-[#C59B27] transition-all"
                       >
-                        <option value="all">All Tasks</option>
-                        <option value="Pending">Pending ⌛</option>
-                        <option value="Completed">Completed ✓</option>
+                        <option value="Pending">Pending Only ⌛</option>
+                        <option value="all">All Active Tasks</option>
+                        <option value="Completed">Recently Completed (&lt;24h) ✓</option>
                       </select>
                       
                       <button
@@ -2473,9 +2596,9 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
                         onChange={(e) => setMonthlyStatusFilter(e.target.value as any)}
                         className="text-xs bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 dark:text-white rounded-lg px-2.5 py-1.5 focus:outline-none cursor-pointer hover:border-[#C59B27] transition-all"
                       >
-                        <option value="all">All Tasks</option>
-                        <option value="Pending">Pending ⌛</option>
-                        <option value="Completed">Completed ✓</option>
+                        <option value="Pending">Pending Only ⌛</option>
+                        <option value="all">All Active Tasks</option>
+                        <option value="Completed">Recently Completed (&lt;24h) ✓</option>
                       </select>
                       
                       <button
@@ -2568,9 +2691,9 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
                         onChange={(e) => setYearlyStatusFilter(e.target.value as any)}
                         className="text-xs bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 dark:text-white rounded-lg px-2.5 py-1.5 focus:outline-none cursor-pointer hover:border-[#C59B27] transition-all"
                       >
-                        <option value="all">All Tasks</option>
-                        <option value="Pending">Pending ⌛</option>
-                        <option value="Completed">Completed ✓</option>
+                        <option value="Pending">Pending Only ⌛</option>
+                        <option value="all">All Active Tasks</option>
+                        <option value="Completed">Recently Completed (&lt;24h) ✓</option>
                       </select>
                       
                       <button
@@ -2649,6 +2772,201 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
                 }}
                 onUpdateTaskDate={handleUpdateTaskDate}
               />
+            </div>
+          )}
+
+          {/* ================= VIEW: COMPLETED TASKS (ARCHIVE FOLDER) ================= */}
+          {activeView === 'completed-tasks' && (
+            <div className="animate-fade-in space-y-6">
+              <div className="bg-white/85 dark:bg-[#112240] border border-gray-200/50 dark:border-gold-500/5 p-6 rounded-2xl shadow-sm">
+                {/* Header Bar */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-100 dark:border-slate-800 pb-4 mb-4">
+                  <div>
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2.5 bg-emerald-500/10 rounded-xl text-emerald-500">
+                        <FolderCheck className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h3 className="font-serif font-bold text-xl tracking-widest text-[#C59B27] uppercase">
+                          COMPLETED TASKS FOLDER
+                        </h3>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          កិច្ចការដែលបានបំពេញរួចរាល់ (រំលង ២៤ ម៉ោង ត្រូវបានដកចេញពី Daily, Monthly, Yearly មកទីនេះដោយស្វ័យប្រវត្តិ)
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Search & Filters */}
+                  <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+                    <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap sm:flex-nowrap">
+                      {/* Filter by Type */}
+                      <span className="text-[11px] font-mono text-gray-400 dark:text-gray-300 whitespace-nowrap">Type:</span>
+                      <select
+                        value={completedTypeFilter}
+                        onChange={(e) => setCompletedTypeFilter(e.target.value as any)}
+                        className="text-xs bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 dark:text-white rounded-lg px-2.5 py-1.5 focus:outline-none cursor-pointer hover:border-emerald-500 transition-all"
+                      >
+                        <option value="all">All Types ({archivedTasks.length})</option>
+                        <option value="daily">Daily ({archivedTasks.filter(t => t.type === 'daily').length})</option>
+                        <option value="monthly">Monthly ({archivedTasks.filter(t => t.type === 'monthly').length})</option>
+                        <option value="yearly">Yearly ({archivedTasks.filter(t => t.type === 'yearly').length})</option>
+                      </select>
+
+                      {/* Filter by Priority */}
+                      <span className="text-[11px] font-mono text-gray-400 dark:text-gray-300 whitespace-nowrap sm:ml-2">Priority:</span>
+                      <select
+                        value={completedPriorityFilter}
+                        onChange={(e) => setCompletedPriorityFilter(e.target.value as any)}
+                        className="text-xs bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 dark:text-white rounded-lg px-2.5 py-1.5 focus:outline-none cursor-pointer hover:border-emerald-500 transition-all"
+                      >
+                        <option value="all">All Priorities</option>
+                        <option value="High">High 🔴</option>
+                        <option value="Medium">Medium 🟡</option>
+                        <option value="Low">Low 🟢</option>
+                      </select>
+
+                      {/* Sort */}
+                      <span className="text-[11px] font-mono text-gray-400 dark:text-gray-300 whitespace-nowrap sm:ml-2">Sort:</span>
+                      <select
+                        value={completedSortBy}
+                        onChange={(e) => setCompletedSortBy(e.target.value as any)}
+                        className="text-xs bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 dark:text-white rounded-lg px-2.5 py-1.5 focus:outline-none cursor-pointer hover:border-emerald-500 transition-all"
+                      >
+                        <option value="completed-desc">Newest Completed</option>
+                        <option value="completed-asc">Oldest Completed</option>
+                        <option value="date-desc">Task Date</option>
+                      </select>
+                    </div>
+
+                    <div className="relative w-full sm:w-64">
+                      <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                      <input 
+                        type="text" 
+                        value={completedFilterQuery}
+                        onChange={(e) => setCompletedFilterQuery(e.target.value)}
+                        placeholder="Search completed tasks..." 
+                        className="w-full pl-9 pr-4 py-1.5 text-xs border border-gray-200 rounded-full focus:outline-none dark:bg-slate-900/50 dark:border-slate-800 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Auto-archive Info Banner */}
+                <div className="mb-4 p-3 bg-emerald-500/5 dark:bg-emerald-950/20 border border-emerald-500/20 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-gray-600 dark:text-gray-300">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <span>
+                      <b>ច្បាប់ស្វ័យប្រវត្តិ ២៤ ម៉ោង៖</b> រាល់កិច្ចការដែលបានចុច <b>Completed</b> ក្នុង Daily, Monthly, ឬ Yearly នឹងត្រូវដកចេញ និងផ្ទេរមកទីនេះដោយស្វ័យប្រវត្តិក្នងរយៈពេល ២៤ ម៉ោង ដើម្បីរក្សាទុកតែភារកិច្ចមិនទាន់បំពេញក្នុងបញ្ជីដើម។
+                    </span>
+                  </div>
+                  <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full shrink-0 self-start sm:self-auto">
+                    សរុប៖ {archivedTasks.length} ភារកិច្ច
+                  </span>
+                </div>
+
+                {/* List of Completed Task Cards */}
+                <div className="space-y-3 min-h-[300px]">
+                  {getFilteredCompleted().map((t) => (
+                    <div 
+                      key={t.id}
+                      className="p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.02] dark:bg-emerald-950/10 hover:border-emerald-500/40 transition-all flex flex-col md:flex-row md:items-center justify-between gap-3 group"
+                    >
+                      <div className="flex items-start gap-3.5 flex-1 min-w-0">
+                        <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5">
+                          <CheckCircle2 className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h4 className="font-semibold text-sm text-gray-800 dark:text-slate-100 line-through decoration-emerald-500/70 truncate" title={t.task}>
+                              {t.task}
+                            </h4>
+                            <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full ${
+                              t.type === 'daily' 
+                                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' 
+                                : t.type === 'monthly'
+                                ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400'
+                                : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                            }`}>
+                              {t.type} Task
+                            </span>
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                              t.priority === 'High' ? 'bg-red-500/10 text-red-600 dark:text-red-400' :
+                              t.priority === 'Medium' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
+                              'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            }`}>
+                              {t.priority}
+                            </span>
+                            {t.completedAt && (
+                              <span className="text-[10px] text-gray-400 font-mono">
+                                ({Math.max(1, Math.floor((Date.now() - new Date(t.completedAt).getTime()) / (1000 * 60 * 60)))} ម៉ោងមុន)
+                              </span>
+                            )}
+                          </div>
+
+                          {t.description && (
+                            <p className="text-xs text-gray-400 dark:text-gray-400 mt-1 line-clamp-1">
+                              {t.description}
+                            </p>
+                          )}
+
+                          <div className="flex flex-wrap items-center gap-4 mt-2 text-[11px] text-gray-400 font-mono">
+                            <span className="flex items-center gap-1">
+                              <Calendar className="w-3.5 h-3.5 text-gray-400" /> {t.date} {t.time}
+                            </span>
+                            {t.completedAt && (
+                              <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
+                                <Clock className="w-3.5 h-3.5" /> បំពេញកាលពី៖ {new Date(t.completedAt).toLocaleString('km-KH')}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Actions: Restore & Permanent Delete */}
+                      <div className="flex items-center gap-2 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-gray-100 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => handleRestoreArchived(t.id)}
+                          className="px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/20 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                          title="Restore this task back to pending in its tracker"
+                        >
+                          <ArchiveRestore className="w-3.5 h-3.5" />
+                          <span>Restore (បង្វិលវិញ)</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm(`តើអ្នកពិតជាចង់លុបកិច្ចការ «${t.task}» នេះជាអចិន្ត្រៃយ៍មែនទេ?`)) {
+                              handlePermanentDelete(t.id);
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/20 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                          title="Permanently delete task from cloud and Google Sheet"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {getFilteredCompleted().length === 0 && (
+                    <div className="text-center py-16 px-4">
+                      <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-3 text-emerald-500">
+                        <FolderCheck className="w-8 h-8" />
+                      </div>
+                      <h4 className="font-semibold text-gray-700 dark:text-gray-200 text-sm">
+                        មិនទាន់មានភារកិច្ចក្នុង Folder កិច្ចការដែលបានបំពេញរួចនៅឡើយទេ
+                      </h4>
+                      <p className="text-xs text-gray-400 max-w-md mx-auto mt-1 leading-relaxed">
+                        រាល់កិច្ចការដែលអ្នកបាន Check Completed ក្នុង Daily Tasks, Monthly Tasks ឬ Yearly Tasks នឹងត្រូវបានរក្សាទុកនៅទីនោះរយៈពេល ២៤ ម៉ោង រួចនឹងត្រូវដកចេញ និងមករក្សាទុកនៅទីនេះដោយស្វ័យប្រវត្តិ។
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 

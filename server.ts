@@ -595,6 +595,7 @@ async function checkAndSendReminders(): Promise<{ checked: number; sent: number;
             // Mark in local server tasks
             t.telegramPostCompletedNotified = true;
             t.systemNotifiedPostCompleted = true;
+            t.isArchived = true;
             taskMap.set(t.id, t);
 
             // Record system notification on server
@@ -615,7 +616,8 @@ async function checkAndSendReminders(): Promise<{ checked: number; sent: number;
                 const taskRef = doc(db, "tasks", t.id);
                 await updateDoc(taskRef, {
                   telegramPostCompletedNotified: true,
-                  systemNotifiedPostCompleted: true
+                  systemNotifiedPostCompleted: true,
+                  isArchived: true
                 }).catch(() => {});
 
                 const alertLockRef = doc(db, "telegram_sent_alerts", postAlertKey);
