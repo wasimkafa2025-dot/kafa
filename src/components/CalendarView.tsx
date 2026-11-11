@@ -338,15 +338,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 <h4 className={`font-bold text-sm truncate ${isComp ? 'line-through underline opacity-60' : ''}`}>{t.task}</h4>
                 <p className="text-xs font-mono mt-0.5 opacity-70">{t.time} | {t.priority} Priority</p>
               </div>
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleComplete(t.id);
-                }}
-                className={`text-xs font-bold cursor-pointer ${isComp ? 'text-red-500 hover:text-red-600' : 'text-gold-500 hover:text-gold-600'}`}
-              >
-                {isComp ? 'Re-open' : 'Complete'}
-              </button>
             </div>
           );
         })}

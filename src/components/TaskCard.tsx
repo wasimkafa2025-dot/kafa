@@ -4,7 +4,7 @@ import { Check, Edit, Trash, Copy, Archive, CheckSquare, Square, Eye, Calendar, 
 
 interface TaskCardProps {
   task: Task;
-  onToggleComplete: (id: string) => void;
+  onToggleComplete?: (id: string) => void;
   onEdit: (id: string, type: 'daily' | 'monthly' | 'yearly') => void;
   onDelete: (id: string) => void;
   onDuplicate?: (id: string) => void;
@@ -162,19 +162,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="flex items-center gap-4 min-w-0 flex-1">
-          <button 
-            type="button"
-            onClick={() => onToggleComplete(t.id)}
-            className={`flex items-center justify-center w-6 h-6 rounded-lg transition-all border cursor-pointer shrink-0 ${
-              isCompleted 
-                ? 'bg-emerald-500 border-emerald-500 text-white shadow-xs' 
-                : 'border-gray-300 dark:border-slate-700 hover:border-gold-500 text-transparent hover:bg-gold-500/10'
-            }`}
-            title={isCompleted ? "ត្រឡប់ទៅកន្លែងមិនទាន់បំពេញវិញ (Mark Pending)" : "សម្គាល់ថាបានបំពេញ (Mark Completed)"}
-          >
-            <Check className="w-3.5 h-3.5 stroke-[3]" />
-          </button>
+        <div className="flex items-center gap-3.5 min-w-0 flex-1">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <h4 className={`font-sans font-bold text-base ${textStyle} truncate`}>
@@ -187,21 +175,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                 </span>
               )}
               {urgencyIndicator}
-
-              {/* 1-Day Post-Completed Notification Status */}
-              {isCompleted && (
-                t.telegramPostCompletedNotified ? (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-300/30 shrink-0">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                    <span>បានផ្ញើសារអូតូរំលង ១ ថ្ងៃរួចរាល់</span>
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 px-2 py-0.5 rounded-full border border-amber-300/30 shrink-0">
-                    <Clock className="w-3 h-3 text-amber-600" />
-                    <span>រង់ចាំរំលង ១ ថ្ងៃដើម្បីផ្ញើសារអូតូ</span>
-                  </span>
-                )
-              )}
             </div>
             
             <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500 font-mono mt-1 flex-wrap">
@@ -226,19 +199,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                     {t.tags}
                   </span>
                 </>
-              )}
-
-              {/* Quick Trigger for 1-Day Completed Notification if not sent yet */}
-              {isCompleted && !t.telegramPostCompletedNotified && onSendPostCompleted && (
-                <button
-                  type="button"
-                  onClick={() => onSendPostCompleted(t.id)}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-gold-500 hover:bg-gold-600 text-white text-[10px] font-sans font-bold shadow-xs active:scale-95 transition-all cursor-pointer ml-1"
-                  title="ផ្ញើសារអូតូរំលង ១ ថ្ងៃ ទៅកាន់ Telegram & ប្រព័ន្ធឥឡូវនេះ"
-                >
-                  <Send className="w-2.5 h-2.5" />
-                  <span>ផ្ញើសារអូតូឥឡូវ</span>
-                </button>
               )}
             </div>
           </div>
@@ -342,24 +302,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
           {tagChips}
         </div>
 
-        {isCompleted && (
-          <div className="flex items-center justify-between text-[10px] bg-emerald-500/5 dark:bg-emerald-950/20 p-1.5 rounded-lg border border-emerald-500/15">
-            <span className="text-emerald-700 dark:text-emerald-300 font-semibold truncate">
-              {t.completedAt ? `✓ បំពេញ៖ ${new Date(t.completedAt).toLocaleDateString('km-KH', { month: 'numeric', day: 'numeric' })}` : '✓ បំពេញរួច'}
-            </span>
-            {t.telegramPostCompletedNotified ? (
-              <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-0.5">
-                <CheckCircle2 className="w-2.5 h-2.5" /> ផ្ញើសារ ១ ថ្ងៃរួច
-              </span>
-            ) : (
-              <span className="text-amber-600 dark:text-amber-400 font-medium flex items-center gap-0.5">
-                <Clock className="w-2.5 h-2.5" /> រង់ចាំ ១ ថ្ងៃ
-              </span>
-            )}
-          </div>
-        )}
-        
-        <div className="flex justify-between items-center">
+        <div className="flex items-center">
           {t.type === 'yearly' ? (
             <div className="flex items-center gap-1 mt-1 text-[10px] font-mono text-gray-400">
               <Calendar className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500" /> Month: {t.month}
@@ -369,15 +312,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({
               <Clock className="w-3.5 h-3.5" /> {t.date} at {t.time}
             </div>
           )}
-          
-          <button 
-            type="button"
-            onClick={() => onToggleComplete(t.id)} 
-            className={`text-xs flex items-center gap-1.5 font-semibold cursor-pointer py-1.5 px-2.5 rounded-lg border border-transparent hover:border-gray-100 dark:hover:border-slate-800 transition-all ${isCompleted ? 'text-red-500 hover:text-red-600 bg-red-50/50 dark:bg-red-950/10' : 'text-gold-500 hover:text-gold-600 bg-gold-500/5 dark:bg-gold-500/5'}`}
-          >
-            {isCompleted ? <CheckSquare className="w-4 h-4 md:w-3.5 md:h-3.5" /> : <Square className="w-4 h-4 md:w-3.5 md:h-3.5" />}
-            <span>{isCompleted ? 'Completed' : 'Pending'}</span>
-          </button>
         </div>
       </div>
     </div>

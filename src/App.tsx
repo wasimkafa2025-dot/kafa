@@ -96,6 +96,21 @@ function getTimeOfDayGreeting(): { text: string; icon: 'sun' | 'moon' } {
   }
 }
 
+// Helper to determine if a task is already finished/past its scheduled date and time
+export function isTaskPastSchedule(task: Partial<Task>): boolean {
+  if (task.isArchived || task.status === 'Completed') return true;
+  if (!task.date) return false;
+  try {
+    const timeStr = task.time || '23:59';
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    const [year, month, day] = task.date.split('-').map(Number);
+    const taskTime = new Date(year, month - 1, day, hours || 0, minutes || 0, 0);
+    return Date.now() >= taskTime.getTime();
+  } catch {
+    return false;
+  }
+}
+
 // Session-level tracking set to prevent double automated Telegram notifications due to React re-renders or concurrent interval ticks
 const inFlightTelegramAlerts = new Set<string>();
 
@@ -587,10 +602,15 @@ export default function App() {
 
       snapshot.forEach((doc) => {
         const data = doc.data() as Task;
-        // Check if document is archived OR completed more than 24 hours ago
-        const isCompletedPast24h = data.status === 'Completed' && data.completedAt && (now - new Date(data.completedAt).getTime() >= TWENTY_FOUR_HOURS);
-        if ((data as any).isArchived || isCompletedPast24h) {
-          archivedList.push({ ...data, isArchived: true, status: 'Completed' });
+        // Check if document is archived OR past schedule (finished)
+        const isFinished = isTaskPastSchedule(data);
+        if (isFinished) {
+          archivedList.push({
+            ...data,
+            isArchived: true,
+            status: 'Completed',
+            completedAt: data.completedAt || (data.date + (data.time ? ' ' + data.time : ''))
+          });
         } else {
           activeList.push(data);
         }
@@ -658,23 +678,21 @@ export default function App() {
     }
   }, [tasks]);
 
-  // 24-Hour Auto-Archive Effect: Checks periodically for completed tasks reaching 24 hours
+  // Auto-Archive Effect: Checks periodically for finished tasks and moves them to Completed Folder
   useEffect(() => {
     if (!currentUser) return;
     const checkAutoArchive = () => {
-      const now = Date.now();
-      const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-      
-      const expiredTasks = tasks.filter(t => 
-        t.status === 'Completed' && 
-        t.completedAt && 
-        (now - new Date(t.completedAt).getTime() >= TWENTY_FOUR_HOURS)
-      );
+      const finishedTasks = tasks.filter(t => isTaskPastSchedule(t));
 
-      if (expiredTasks.length > 0) {
-        const expiredIds = new Set(expiredTasks.map(t => t.id));
-        const updatedActive = tasks.filter(t => !expiredIds.has(t.id));
-        const newlyArchived = expiredTasks.map(t => ({ ...t, isArchived: true, status: 'Completed' as const }));
+      if (finishedTasks.length > 0) {
+        const finishedIds = new Set(finishedTasks.map(t => t.id));
+        const updatedActive = tasks.filter(t => !finishedIds.has(t.id));
+        const newlyArchived = finishedTasks.map(t => ({
+          ...t,
+          isArchived: true,
+          status: 'Completed' as const,
+          completedAt: t.completedAt || new Date().toISOString()
+        }));
         const updatedArchived = [...archivedTasks, ...newlyArchived];
 
         setTasks(updatedActive);
@@ -682,19 +700,19 @@ export default function App() {
         localStorage.setItem(`taskflow_tasks_${currentUser}`, JSON.stringify(updatedActive));
         localStorage.setItem(`taskflow_archived_${currentUser}`, JSON.stringify(updatedArchived));
 
-        // Sync updates to Firestore & Google Sheets
+        // Sync updates to Firestore & Google Sheets (no Telegram completion message sent)
         const db = getActiveDb();
         newlyArchived.forEach(t => {
-          setDoc(doc(db, "tasks", t.id), { ...t, isArchived: true, userId: currentUser }).catch(() => {});
-          syncTaskToGoogleSheet(t, 'archive').catch(() => {});
+          setDoc(doc(db, "tasks", t.id), { ...t, isArchived: true, status: 'Completed', userId: currentUser }).catch(() => {});
+          syncTaskToGoogleSheet(t, 'complete').catch(() => {});
         });
 
-        logActivity(`Auto-moved ${expiredTasks.length} completed task(s) to Completed Folder (24h elapsed)`);
+        logActivity(`Auto-saved ${finishedTasks.length} finished task(s) into Completed Tasks storage`);
       }
     };
 
     checkAutoArchive();
-    const interval = setInterval(checkAutoArchive, 30000);
+    const interval = setInterval(checkAutoArchive, 15000);
     return () => clearInterval(interval);
   }, [tasks, archivedTasks, currentUser]);
 
@@ -1044,39 +1062,6 @@ export default function App() {
       const db = getActiveDb();
       await setDoc(doc(db, "tasks", id), updated);
       logActivity(`Toggled completion of task: "${task.task}"`);
-
-      // Send Telegram notification if marked as completed
-      if (updated.status === 'Completed') {
-        const isKhmer = /[\u1780-\u17FF]/.test(task.task);
-        const priorityEmoji = task.priority === 'High' ? '🔴' : task.priority === 'Medium' ? '🟡' : '🟢';
-        const safeTitle = escapeTelegramHtml(task.task);
-        
-        let messageText = '';
-        if (isKhmer) {
-          const priorityKh = task.priority === 'High' ? 'បន្ទាន់' : task.priority === 'Medium' ? 'មធ្យម' : 'មិនសូវបន្ទាន់';
-          messageText = `<b>✅ កិច្ចការត្រូវបានបំពេញរួចរាល់!</b>\n\n` +
-                        `សួស្តីលោក កាហ្វា, កិច្ចការខាងក្រោមត្រូវបានបំពេញរួចរាល់៖\n\n` +
-                        `📋 <b>ប្រធានបទ៖</b> <s><u>${safeTitle}</u></s>\n` +
-                        `📅 <b>ថ្ងៃបញ្ចប់៖</b> <code>${new Date().toLocaleDateString('km-KH')}</code>\n` +
-                        `⚡ <b>អាទិភាព៖</b> ${priorityEmoji} <b>${priorityKh}</b>\n\n` +
-                        `សូមអរគុណ!`;
-        } else {
-          messageText = `<b>✅ Task Completed!</b>\n\n` +
-                        `Hello Mr. Kafa, the following task has been marked completed:\n\n` +
-                        `📋 <b>Title:</b> <s><u>${safeTitle}</u></s>\n` +
-                        `📅 <b>Completed At:</b> <code>${new Date().toLocaleDateString()}</code>\n` +
-                        `⚡ <b>Priority:</b> ${priorityEmoji} <b>${task.priority}</b>\n\n` +
-                        `Thank you!`;
-        }
-
-        sendTelegramMessage(messageText, `completed_${task.id}`).then((success) => {
-          if (success) {
-            logActivity(`Sent completion Telegram alert for: "${task.task}"`);
-          }
-        }).catch((err) => {
-          console.error("Error sending completion Telegram message:", err);
-        });
-      }
     } catch (e) {
       console.warn("Firestore write failed, using local/offline storage:", e);
     }
@@ -1619,17 +1604,8 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
     });
   };
 
-  const isTaskOver24HoursCompleted = (t: Task) => {
-    if (t.isArchived) return true;
-    if (t.status === 'Completed' && t.completedAt) {
-      const time = new Date(t.completedAt).getTime();
-      return !isNaN(time) && (Date.now() - time >= 24 * 60 * 60 * 1000);
-    }
-    return false;
-  };
-
   const getFilteredDaily = () => {
-    let list = tasks.filter(t => t.type === 'daily' && !isTaskOver24HoursCompleted(t));
+    let list = tasks.filter(t => t.type === 'daily' && !isTaskPastSchedule(t));
     if (dailyStatusFilter !== 'all') {
       list = list.filter(t => t.status === dailyStatusFilter);
     }
@@ -1641,7 +1617,7 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
   };
 
   const getFilteredMonthly = () => {
-    let list = tasks.filter(t => t.type === 'monthly' && !isTaskOver24HoursCompleted(t));
+    let list = tasks.filter(t => t.type === 'monthly' && !isTaskPastSchedule(t));
     if (monthlyStatusFilter !== 'all') {
       list = list.filter(t => t.status === monthlyStatusFilter);
     }
@@ -1653,7 +1629,7 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
   };
 
   const getFilteredYearly = () => {
-    let list = tasks.filter(t => t.type === 'yearly' && !isTaskOver24HoursCompleted(t));
+    let list = tasks.filter(t => t.type === 'yearly' && !isTaskPastSchedule(t));
     if (yearlyStatusFilter !== 'all') {
       list = list.filter(t => t.status === yearlyStatusFilter);
     }
@@ -2749,7 +2725,7 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
                           COMPLETED TASKS FOLDER
                         </h3>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                          កិច្ចការដែលបានបំពេញរួចរាល់ (រំលង ២៤ ម៉ោង ត្រូវបានដកចេញពី Daily, Monthly, Yearly មកទីនេះដោយស្វ័យប្រវត្តិ)
+                          កិច្ចការដែលបានធ្វើរួចរាល់ ត្រូវបានប្រព័ន្ធរក្សាទុកចូលក្នុង Folder នេះដោយស្វ័យប្រវត្តិ
                         </p>
                       </div>
                     </div>
@@ -2815,7 +2791,7 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
                   <div className="flex items-center gap-2">
                     <Clock className="w-4 h-4 text-emerald-500 shrink-0" />
                     <span>
-                      <b>ច្បាប់ស្វ័យប្រវត្តិ ២៤ ម៉ោង៖</b> រាល់កិច្ចការដែលបានចុច <b>Completed</b> ក្នុង Daily, Monthly, ឬ Yearly នឹងត្រូវដកចេញ និងផ្ទេរមកទីនេះដោយស្វ័យប្រវត្តិក្នងរយៈពេល ២៤ ម៉ោង ដើម្បីរក្សាទុកតែភារកិច្ចមិនទាន់បំពេញក្នុងបញ្ជីដើម។
+                      <b>ប្រព័ន្ធស្វ័យប្រវត្តិ៖</b> រាល់កិច្ចការដែលបានដល់ ឬរំលងកាលបរិច្ឆេទកំណត់ ត្រូវបានប្រព័ន្ធរក្សាទុកចូលក្នុងកន្លែងផ្ទុក (Completed Tasks) នេះដោយស្វ័យប្រវត្តិ ដោយមិនចាំបាច់ចុចបញ្ជាក់ឡើយ។
                     </span>
                   </div>
                   <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full shrink-0 self-start sm:self-auto">
@@ -3030,12 +3006,6 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
                 Edit Task
               </button>
               <button 
-                onClick={() => { handleToggleComplete(detailModalTask.id); setDetailModalTask(null); }}
-                className="flex-1 py-2.5 bg-[#C59B27] hover:bg-[#A8801B] text-white text-xs font-semibold rounded-xl cursor-pointer"
-              >
-                {detailModalTask.status === 'Completed' ? 'Mark Pending' : 'Mark Completed'}
-              </button>
-              <button 
                 type="button"
                 onClick={() => { 
                   if (window.confirm("លុបកិច្ចការនេះចេញពីប្រព័ន្ធ និង Google Sheet? / Delete this task from system and Google Sheet?")) {
@@ -3043,10 +3013,11 @@ Keep answers clear, highly conversational (2-3 sentences max) and encouraging. A
                     setDetailModalTask(null); 
                   }
                 }}
-                className="px-3.5 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/20 rounded-xl cursor-pointer transition-colors flex items-center justify-center"
+                className="px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/20 rounded-xl cursor-pointer transition-colors flex items-center justify-center gap-1.5 text-xs font-semibold"
                 title="លុបចេញពីប្រព័ន្ធ និង Google Sheet / Delete from system and Google Sheet"
               >
                 <Trash2 className="w-4 h-4" />
+                <span>Delete Task</span>
               </button>
             </div>
           </div>

@@ -576,64 +576,35 @@ async function checkAndSendReminders(): Promise<{ checked: number; sent: number;
       }
     }
 
-    // 3. Completed Task 1-Day Post-Completion Auto-Notification (រំលងបាន ១ ថ្ងៃ)
-    if (t.status === "Completed" && t.completedAt) {
-      if (isOneDayPostCompletion(t.completedAt)) {
-        const postAlertKey = `tg_alert_post_comp_1day_${t.id}`;
-        
-        if (!sentAlertsMemory.has(postAlertKey) && !t.telegramPostCompletedNotified) {
-          console.log(`[24/7 Worker] Found completed task with 1-day milestone reached (${t.completedAt}): "${t.task}" (ID: ${t.id}). Dispatching Telegram & System auto-message...`);
-          const messageText = buildPostCompletedMessage(t);
-          const sent = await sendTelegramRaw(messageText);
+    // 3. Auto-archive past due or completed tasks without sending Telegram messages (per user request)
+    const isPastDueOrCompleted = t.status === "Completed" || (t.date && (() => {
+      try {
+        const timeStr = t.time || '23:59';
+        const [hours, mins] = timeStr.split(':').map(Number);
+        const [y, m, d] = t.date.split('-').map(Number);
+        const taskTime = new Date(y, m - 1, d, hours || 0, mins || 0, 0);
+        return Date.now() >= taskTime.getTime();
+      } catch {
+        return false;
+      }
+    })());
 
-          if (sent) {
-            sentAlertsMemory.add(postAlertKey);
-            saveSentAlerts(sentAlertsMemory);
-            sentCount++;
-            sentTitles.push(`${t.task} (Completed +1 Day)`);
+    if (isPastDueOrCompleted && !t.isArchived) {
+      t.status = "Completed";
+      t.isArchived = true;
+      if (!t.completedAt) t.completedAt = new Date().toISOString();
+      taskMap.set(t.id, t);
 
-            // Mark in local server tasks
-            t.telegramPostCompletedNotified = true;
-            t.systemNotifiedPostCompleted = true;
-            t.isArchived = true;
-            taskMap.set(t.id, t);
-
-            // Record system notification on server
-            addServerNotification({
-              id: `notif_post_comp_${t.id}`,
-              taskId: t.id,
-              taskTitle: t.task,
-              type: "post_completed_1day",
-              title: `កិច្ចការបានបំពេញរំលង ១ ថ្ងៃ៖ ${t.task}`,
-              message: `កិច្ចការ «${t.task}» ត្រូវបានអ្នកបំពេញរួចរាល់រំលងបាន ១ ថ្ងៃហើយ។ ប្រព័ន្ធបានរក្សាទុកក្នុងកន្លែងផ្ទុកកិច្ចការដែលបានបំពេញរួច និងបានផ្ញើសារអូតូទៅកាន់ Telegram រួចរាល់។`,
-              createdAt: new Date().toISOString(),
-              read: false
-            });
-
-            // Mark in Firestore
-            if (db) {
-              try {
-                const taskRef = doc(db, "tasks", t.id);
-                await updateDoc(taskRef, {
-                  telegramPostCompletedNotified: true,
-                  systemNotifiedPostCompleted: true,
-                  isArchived: true
-                }).catch(() => {});
-
-                const alertLockRef = doc(db, "telegram_sent_alerts", postAlertKey);
-                await setDoc(alertLockRef, {
-                  sent: true,
-                  sentAt: new Date().toISOString(),
-                  taskId: t.id,
-                  taskTitle: t.task,
-                  type: "post_completed_1day",
-                  source: "server_24_7_worker"
-                }).catch(() => {});
-              } catch (err) {
-                console.warn("Could not update Firestore post-completion alert flag:", err);
-              }
-            }
-          }
+      if (db) {
+        try {
+          const taskRef = doc(db, "tasks", t.id);
+          await updateDoc(taskRef, {
+            status: "Completed",
+            isArchived: true,
+            completedAt: t.completedAt
+          }).catch(() => {});
+        } catch (err) {
+          console.warn("Could not auto-archive past task in Firestore:", err);
         }
       }
     }
