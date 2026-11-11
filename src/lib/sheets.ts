@@ -1,6 +1,6 @@
 import { Task } from '../types';
 
-export const DEFAULT_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbx16udHQpOdqaMfcb8JGHjw5EXLypzhZu9IPEmkfDZjgg3_Kzt3o2Nom08wZ8vag2hETA/exec';
+export const DEFAULT_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxHFlm4VHzj2geAjaAzkaRSxOgbScGDEvqrkpJoq2O_TXHLiUY25J9DLt5UfF8IuP41SA/exec';
 
 export function getGoogleSheetsUrl(): string {
   return localStorage.getItem('taskflow_google_sheets_url') || DEFAULT_SHEETS_URL;
