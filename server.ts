@@ -44,7 +44,7 @@ try {
   });
 } catch {}
 
-const TG_BOT_TOKEN = "8735305943:AAGlV3cMV5pMuF6ef6EQzLMrirf4A-oQ79g";
+const TG_BOT_TOKEN = "9094304725:AAEhU0iGMwg1atdgSl-gPq1F7jyMrKZu2zY";
 const TG_CHAT_ID = "-1004222754940";
 
 // Server storage for 24/7 background worker persistence

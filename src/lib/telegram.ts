@@ -1,4 +1,4 @@
-export const DEFAULT_TG_BOT_TOKEN = "8735305943:AAGlV3cMV5pMuF6ef6EQzLMrirf4A-oQ79g";
+export const DEFAULT_TG_BOT_TOKEN = "9094304725:AAEhU0iGMwg1atdgSl-gPq1F7jyMrKZu2zY";
 export const DEFAULT_TG_CHAT_ID = "-1004222754940";
 
 export function getTelegramConfig(): { botToken: string; chatId: string } {
