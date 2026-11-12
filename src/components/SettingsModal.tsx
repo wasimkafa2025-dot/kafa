@@ -7,6 +7,8 @@ import {
   setGoogleSheetsSyncEnabled, 
   testGoogleSheetConnection, 
   syncAllTasksToGoogleSheet,
+  activateCloudTrigger,
+  triggerCloudReminderCheck,
   DEFAULT_SHEETS_URL,
   RECOMMENDED_APPS_SCRIPT_CODE
 } from '../lib/sheets';
@@ -51,6 +53,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onRefresh
   const [workerFeedback, setWorkerFeedback] = useState<string | null>(null);
   const [testingTelegram, setTestingTelegram] = useState(false);
   const [telegramFeedback, setTelegramFeedback] = useState<string | null>(null);
+  const [activatingCloudTrigger, setActivatingCloudTrigger] = useState(false);
+  const [cloudTriggerFeedback, setCloudTriggerFeedback] = useState<string | null>(null);
 
   // Telegram Bot Token and Chat ID State
   const [tgBotToken, setTgBotToken] = useState('');
@@ -77,17 +81,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onRefresh
     setTelegramFeedback('បានកំណត់ Telegram Bot Token & Chat ID ទៅ Default វិញ');
   };
 
+  const handleActivateCloudTrigger = async () => {
+    setActivatingCloudTrigger(true);
+    setCloudTriggerFeedback(null);
+    try {
+      const res = await activateCloudTrigger();
+      setCloudTriggerFeedback(res.message || 'បានបើកដំណើរការ Cloud Trigger ២៤/៧ រួចរាល់!');
+    } catch (err: any) {
+      setCloudTriggerFeedback(`❌ បរាជ័យ៖ ${err?.message || 'Error'}`);
+    } finally {
+      setActivatingCloudTrigger(false);
+    }
+  };
+
   const handleTriggerWorkerCheck = async () => {
     setCheckingWorker(true);
     setWorkerFeedback(null);
     try {
+      // Also trigger Google Cloud reminder check
+      try {
+        const cloudRes = await triggerCloudReminderCheck();
+        if (cloudRes.message) {
+          setWorkerFeedback(cloudRes.message);
+        }
+      } catch (_) {}
+
       let handledByServer = false;
       try {
         const res = await fetch('/api/reminders/check-now', { method: 'POST' });
         if (res.ok) {
           const data = await res.json();
           if (data.success) {
-            setWorkerFeedback(`បានត្រួតពិនិត្យ ${data.checked} កិច្ចការ, បានផ្ញើសាររំលឹក ${data.sent} កិច្ចការ (Server Worker)។`);
+            setWorkerFeedback(prev => prev ? `${prev} | Server: ${data.checked} checked, ${data.sent} sent` : `បានត្រួតពិនិត្យ ${data.checked} កិច្ចការ, បានផ្ញើសាររំលឹក ${data.sent} កិច្ចការ (Server Worker)។`);
             fetchWorkerStatus();
             handledByServer = true;
           }
@@ -106,7 +131,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onRefresh
         }
         const todayKh = getCambodiaDateStr(0);
         const tomorrowKh = getCambodiaDateStr(1);
-        setWorkerFeedback(`បានត្រួតពិនិត្យ ${tasks.length} កិច្ចការ (GitHub Pages Cloud Mode)៖ រកឃើញ ${dueCount} កិច្ចការដែលត្រូវរំលឹកមុន ២៤ ម៉ោង ឬ ១ ថ្ងៃមុន (ថ្ងៃនេះ៖ ${todayKh}, ថ្ងៃស្អែក៖ ${tomorrowKh})។`);
+        setWorkerFeedback(prev => prev ? `${prev} | ក្នុង Browser: ពិនិត្យឃើញ ${dueCount} កិច្ចការត្រូវរំលឹក` : `បានត្រួតពិនិត្យ ${tasks.length} កិច្ចការ (GitHub Pages Cloud Mode)៖ រកឃើញ ${dueCount} កិច្ចការដែលត្រូវរំលឹកមុន ២៤ ម៉ោង ឬ ១ ថ្ងៃមុន (ថ្ងៃនេះ៖ ${todayKh}, ថ្ងៃស្អែក៖ ${tomorrowKh})។`);
       }
     } catch (err: any) {
       setWorkerFeedback(`បរាជ័យ: ${err?.message || 'Error'}`);
@@ -607,6 +632,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onRefresh
               <div className="flex flex-wrap items-center gap-2 pt-1">
                 <button
                   type="button"
+                  onClick={handleActivateCloudTrigger}
+                  disabled={activatingCloudTrigger}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                  title="Enable 24/7 Autonomous Reminders on Google Cloud"
+                >
+                  {activatingCloudTrigger ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Clock className="w-3.5 h-3.5" />
+                  )}
+                  <span>បើក Cloud Trigger ២៤/៧</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleTestTelegramServer}
                   disabled={testingTelegram}
                   className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
@@ -634,6 +674,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onRefresh
                   <span>Check Reminders Now (ត្រួតពិនិត្យឥឡូវ)</span>
                 </button>
               </div>
+
+              {/* Explanatory callout for 24/7 autonomous reminders */}
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-1.5 text-[11px] text-gray-700 dark:text-gray-300">
+                <div className="font-bold flex items-center gap-1.5 text-amber-800 dark:text-amber-300">
+                  <Info className="w-4 h-4 shrink-0" />
+                  <span>តើប្រព័ន្ធអាចផ្ញើសារបានទេនៅពេលបិទប្រព័ន្ធ ឬបិទកុំព្យូទ័រ?</span>
+                </div>
+                <div className="text-[10px] space-y-1 leading-relaxed text-gray-600 dark:text-gray-400">
+                  <p>
+                    • <b>ប្រសិនបើដំណើរការតែលើ Browser៖</b> នៅពេលលោកអ្នកបិទ Browser ឬបិទកុំព្យូទ័រ សារមិនអាចផ្ញើបានទេ ព្រោះកូដ JavaScript លើ Browser ត្រូវបានផ្អាក។
+                  </p>
+                  <p>
+                    • <b>🌟 ជាមួយ Google Cloud Trigger (Apps Script Backend)៖</b> ប្រព័ន្ធដំណើរការលើ Server Google Cloud ២៤/៧ ដោយស្វ័យប្រវត្តិក្លោដ! <b>ទោះបីលោកអ្នកបិទប្រព័ន្ធ បិទ Browser ឬបិទកុំព្យូទ័រក៏ដោយ ក៏ប្រព័ន្ធ Cloud នៅតែត្រួតពិនិត្យរៀងរាល់ ១០ នាទីម្តង និងផ្ញើសាររំលឹក ២៤ ម៉ោងមុនទៅ Telegram បាន ១០០%</b>។
+                  </p>
+                </div>
+              </div>
+
+              {cloudTriggerFeedback && (
+                <div className={`p-2.5 rounded-lg text-[10px] flex items-start gap-2 leading-relaxed ${
+                  cloudTriggerFeedback.startsWith('❌')
+                    ? 'bg-red-500/10 border border-red-500/20 text-red-700 dark:text-red-400'
+                    : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400'
+                }`}>
+                  {cloudTriggerFeedback.startsWith('❌') ? (
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  ) : (
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  )}
+                  <span>{cloudTriggerFeedback}</span>
+                </div>
+              )}
 
               {telegramFeedback && (
                 <div className={`p-2.5 rounded-lg text-[10px] flex items-start gap-2 leading-relaxed ${

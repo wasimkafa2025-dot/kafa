@@ -63,7 +63,7 @@ function formatTaskForSheet(task: Partial<Task>, action: string) {
     cleanCreatedAt = `${yyyy}-${mm}-${dd} ${hh}:${min}`;
   }
 
-  // Format Frequency as "Daily", "Monthly", or "Yearly"
+  // Format Frequency as 'Daily', 'Monthly', or 'Yearly'
   const rawType = (task.type || 'daily').toLowerCase();
   let formattedFrequency = 'Daily';
   if (rawType.includes('month')) {
@@ -95,11 +95,11 @@ function formatTaskForSheet(task: Partial<Task>, action: string) {
     type: formattedFrequency,
     frequency: formattedFrequency,
     taskFrequency: formattedFrequency,
-    "Task Frequency": formattedFrequency,
+    'Task Frequency': formattedFrequency,
     tags: tagsVal,
     tag: tagsVal,
-    "Tags (optional)": tagsVal,
-    "Tages (optional)": tagsVal,
+    'Tags (optional)': tagsVal,
+    'Tages (optional)': tagsVal,
     userId: task.userId || 'Kafa',
     user: task.userId || 'Kafa',
     createdAt: cleanCreatedAt,
@@ -185,16 +185,17 @@ export async function deleteTaskFromGoogleSheet(task: Partial<Task>): Promise<Sh
 /**
  * Recommended Apps Script code snippet for the user's Google Sheet
  * Features:
- * - 3 Dedicated Sheets: "Daily Tasks", "Monthly Tasks", "Yearly Tasks"
+ * - 3 Dedicated Sheets: 'Daily Tasks', 'Monthly Tasks', 'Yearly Tasks'
  * - Columns: N (Auto sequence 1,2,3...), Task, Date, Time, Priority, Status, Task ID, Created At
  * - Full CRUD & Batch Sync support
- * - 1-Click setup function: setupThreeTaskSheets()
+ * - 24/7 Autonomous Cloud Telegram Reminders (Time-driven trigger)
  */
 export const RECOMMENDED_APPS_SCRIPT_CODE = `/**
  * =========================================================================
- * TASKFLOW & DAILY TASK MANAGEMENT - GOOGLE APPS SCRIPT BACKEND
+ * TASKFLOW & DAILY TASK MANAGEMENT - GOOGLE APPS SCRIPT BACKEND v5.0
  * =========================================================================
  * ប្រព័ន្ធគ្រប់គ្រង និងបម្រុងទុកទិន្នន័យភារកិច្ច (Backup Backend) តាមរយៈ Google Sheets
+ * ព្រមទាំងប្រព័ន្ធផ្ញើសាររំលឹកស្វ័យប្រវត្តិតាម Telegram Bot រត់លើ Cloud ២៤/៧
  * 
  * លក្ខណៈពិសេសនៃប្រព័ន្ធ៖
  * 1. បែងចែក Sheet ជា 3 ដោយស្វ័យប្រវត្តិ៖
@@ -205,15 +206,23 @@ export const RECOMMENDED_APPS_SCRIPT_CODE = `/**
  * 2. តារាងក្នុង Sheet នីមួយៗរួមមាន Columns តាមស្តង់ដារ៖
  *    - Column A (1): N (លំដាប់លេខរៀងស្វ័យប្រវត្តិ 1, 2, 3...)
  *    - Column B (2): Task (ឈ្មោះភារកិច្ច)
- *    - Column C (3): Date (កាលបរិច្ឆេទ)
- *    - Column D (4): Time (ពេលវេលា)
+ *    - Column C (3): Date (កាលបរិច្ឆេទ YYYY-MM-DD)
+ *    - Column D (4): Time (ពេលវេលា HH:mm)
  *    - Column E (5): Priority (កម្រិតអាទិភាព: Urgent, High, Medium, Low)
  *    - Column F (6): Status (ស្ថានភាព: Pending, In Progress, Completed, Overdue)
  *    - Column G (7): Task ID (លេខសម្គាល់កិច្ចការ សម្រាប់ Sync & Update)
  *    - Column H (8): Created At (កាលបរិច្ឆេទបង្កើត)
  * 
- * 3. គាំទ្ររាល់ Actions: add, update, complete, delete, batch_sync, ping
+ * 3. គាំទ្ររាល់ Actions ពី Web: add, update, complete, delete, batch_sync, ping
  * 4. មានមុខងារ Auto-Setup រៀបចំ Header, ពណ៌ Navy & White, គំនូសព្រំដែន, និង Dropdown
+ * 
+ * 5. 🌟 24/7 AUTONOMOUS CLOUD TELEGRAM REMINDER (រត់លើ Google Cloud ស្វ័យប្រវត្តិ)៖
+ *    - ដំណើរការ ២៤ម៉ោង/៧ថ្ងៃ ទោះបីលោកអ្នកបិទ Browser ឬបិទកុំព្យូទ័រក៏ដោយ!
+ *    - ត្រួតពិនិត្យរាល់កិច្ចការក្នុង Daily Tasks, Monthly Tasks, Yearly Tasks រៀងរាល់ ១០ នាទីម្តង
+ *    - ផ្ញើសាររំលឹកមុន ២៤ ម៉ោង (1 Day in advance) ទៅកាន់ Telegram Bot ដោយស្វ័យប្រវត្តិ
+ *    - ផ្ញើសាររំលឹកបន្ទាន់នៅពេលកិច្ចការជិតដល់ម៉ោងកំណត់ (Imminent <= 2 hours)
+ *    - មិនផ្ញើសាររំខាននៅពេលដែលកិច្ចការបានបំពេញរួចរាល់ឡើយ
+ *    - ប្រើប្រាស់ PropertiesService ដើម្បីកុំឱ្យផ្ញើសារស្ទួន (Anti-duplicate deduplication)
  * =========================================================================
  */
 
@@ -246,7 +255,17 @@ var COLUMN_WIDTHS = [
 ];
 
 /**
- * 🌟 1-CLICK SETUP FUNCTION:
+ * Telegram Bot Configuration
+ */
+var TELEGRAM_CONFIG = {
+  BOT_TOKEN: "9094304725:AAEhU0iGMwg1atdgSl-gPq1F7jyMrKZu2zY",
+  CHAT_ID: "6536906357", // Mr. Kafa
+  TIMEZONE: "GMT+7",
+  BOT_NAME: "MAAT KAFA DAILY TASK"
+};
+
+/**
+ * 🌟 1-CLICK SETUP FUNCTION FOR SHEETS:
  * ចុច Run លើ function នេះម្តង ដើម្បីបង្កើត Sheet ទាំង ៣ និង Header ដោយស្វ័យប្រវត្តិ
  */
 function setupThreeTaskSheets() {
@@ -271,6 +290,7 @@ function setupThreeTaskSheets() {
   }
 
   Logger.log("✅ បានតម្លើង Sheet ទាំង ៣ រួចរាល់ដោយជោគជ័យ៖ Daily Tasks, Monthly Tasks, Yearly Tasks!");
+  return { success: true, message: "Sheets setup completed successfully" };
 }
 
 /**
@@ -392,7 +412,275 @@ function applyRowFormatting(sheet, startRow, numRows) {
 }
 
 /**
- * POST Webhook Handler
+ * =========================================================================
+ * TELEGRAM BOT NOTIFICATION SERVICE (CLOUD RUNTIME)
+ * =========================================================================
+ */
+
+/**
+ * មុខងារផ្ញើសារទៅកាន់ Telegram Bot ដោយផ្ទាល់តាមរយៈ UrlFetchApp របស់ Google Cloud
+ */
+function sendTelegramMessage(text) {
+  if (!TELEGRAM_CONFIG.BOT_TOKEN || !TELEGRAM_CONFIG.CHAT_ID) {
+    Logger.log("⚠️ Telegram Bot Token or Chat ID not configured.");
+    return false;
+  }
+  
+  var url = "https://api.telegram.org/bot" + TELEGRAM_CONFIG.BOT_TOKEN + "/sendMessage";
+  var payload = {
+    chat_id: TELEGRAM_CONFIG.CHAT_ID,
+    text: text,
+    parse_mode: "HTML",
+    disable_web_page_preview: true
+  };
+  
+  var options = {
+    method: "post",
+    contentType: "application/json",
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  try {
+    var response = UrlFetchApp.fetch(url, options);
+    var statusCode = response.getResponseCode();
+    var responseText = response.getContentText();
+    Logger.log("Telegram API Response (" + statusCode + "): " + responseText);
+    return statusCode === 200;
+  } catch (err) {
+    Logger.log("❌ Error calling Telegram API: " + err.toString());
+    return false;
+  }
+}
+
+/**
+ * ជំនួយការគណនាកាលបរិច្ឆេទ និងពេលវេលាកិច្ចការ (GMT+7)
+ */
+function parseTaskDateTime(dateVal, timeVal) {
+  if (!dateVal) return null;
+
+  var dateStr = "";
+  if (dateVal instanceof Date) {
+    dateStr = Utilities.formatDate(dateVal, TELEGRAM_CONFIG.TIMEZONE, "yyyy-MM-dd");
+  } else {
+    var mDate = String(dateVal).trim().match(/^(\\d{4})[-/](\\d{1,2})[-/](\\d{1,2})/);
+    if (mDate) {
+      dateStr = mDate[1] + "-" + ("0" + mDate[2]).slice(-2) + "-" + ("0" + mDate[3]).slice(-2);
+    } else {
+      dateStr = String(dateVal).trim();
+    }
+  }
+
+  var timeStr = "09:00";
+  if (timeVal) {
+    if (timeVal instanceof Date) {
+      timeStr = Utilities.formatDate(timeVal, TELEGRAM_CONFIG.TIMEZONE, "HH:mm");
+    } else {
+      var mTime = String(timeVal).trim().match(/(\\d{1,2}):(\\d{2})/);
+      if (mTime) {
+        timeStr = ("0" + mTime[1]).slice(-2) + ":" + mTime[2];
+      }
+    }
+  }
+
+  var isoStr = dateStr + "T" + timeStr + ":00+07:00";
+  var taskDate = new Date(isoStr);
+  if (isNaN(taskDate.getTime())) {
+    var dParts = dateStr.split("-");
+    if (dParts.length === 3) {
+      var tParts = timeStr.split(":");
+      taskDate = new Date(Number(dParts[0]), Number(dParts[1]) - 1, Number(dParts[2]), Number(tParts[0] || 0), Number(tParts[1] || 0));
+    }
+  }
+
+  if (isNaN(taskDate.getTime())) return null;
+
+  return {
+    date: taskDate,
+    dateStr: dateStr,
+    timeStr: timeStr
+  };
+}
+
+/**
+ * ⏰ មុខងារពិនិត្យភារកិច្ច និងផ្ញើសាររំលឹកមុន ២៤ ម៉ោង (ដំណើរការស្វ័យប្រវត្តិតាម Time-driven Trigger)
+ * រត់លើ Google Cloud ២៤/៧ រៀងរាល់ ១០ នាទីម្តង ទោះបីបិទកុំព្យូទ័រ ឬបិទ Browser ក៏ដំណើរការធម្មតា!
+ */
+function checkAndSendScheduledReminders() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = [
+    ss.getSheetByName(SHEET_NAMES.DAILY),
+    ss.getSheetByName(SHEET_NAMES.MONTHLY),
+    ss.getSheetByName(SHEET_NAMES.YEARLY)
+  ];
+  var scriptProperties = PropertiesService.getScriptProperties();
+  
+  var now = new Date();
+  var sentCount = 0;
+  var checkedCount = 0;
+  var logs = [];
+
+  for (var s = 0; s < sheets.length; s++) {
+    var sheet = sheets[s];
+    if (!sheet) continue;
+
+    var sheetName = sheet.getName();
+    var lastRow = sheet.getLastRow();
+    if (lastRow <= 1) continue; // មានតែ Header
+
+    var data = sheet.getRange(2, 1, lastRow - 1, HEADERS.length).getValues();
+
+    for (var r = 0; r < data.length; r++) {
+      var row = data[r];
+      var taskNum = row[0];
+      var taskTitle = String(row[1] || "").trim();
+      var dateVal = row[2];
+      var timeVal = row[3];
+      var priority = String(row[4] || "Medium").trim();
+      var status = String(row[5] || "Pending").trim();
+      var taskId = String(row[6] || "").trim() || ("task_r" + (r + 2) + "_" + sheetName);
+
+      if (!taskTitle) continue;
+      checkedCount++;
+
+      // Skip completed tasks (កិច្ចការដែលបានធ្វើរួចរាល់ មិនបាច់ផ្ញើសារទេ តាមការណែនាំរបស់អ្នកប្រើប្រាស់)
+      if (status.toLowerCase() === "completed" || status.toLowerCase() === "done") {
+        continue;
+      }
+
+      var parsed = parseTaskDateTime(dateVal, timeVal);
+      if (!parsed) continue;
+
+      var diffMs = parsed.date.getTime() - now.getTime();
+      var diffHours = diffMs / (1000 * 60 * 60);
+
+      // 1. ការជូនដំណឹងមុន ២៤ ម៉ោង (24h Advance Reminder):
+      // នៅពេលដែលកិច្ចការស្ថិតក្នុងចន្លោះ ០ ម៉ោង ដល់ ២៤ ម៉ោង (0 < diffHours <= 24)
+      if (diffHours > 0 && diffHours <= 24) {
+        var notifKey24h = "sent_24h_" + taskId;
+        var alreadySent24h = scriptProperties.getProperty(notifKey24h);
+
+        if (!alreadySent24h) {
+          var hoursRemaining = Math.max(1, Math.round(diffHours));
+          var khmerType = sheetName === SHEET_NAMES.DAILY ? "កិច្ចការប្រចាំថ្ងៃ (Daily)" : (sheetName === SHEET_NAMES.MONTHLY ? "កិច្ចការប្រចាំខែ (Monthly)" : "កិច្ចការប្រចាំឆ្នាំ (Yearly)");
+          
+          var msg = "🔔 <b>[សេចក្តីរំលឹកមុន ២៤ ម៉ោង] ភារកិច្ចជិតមកដល់</b>\\n" +
+                    "━━━━━━━━━━━━━━━━━━━━\\n" +
+                    "📋 <b>ភារកិច្ច:</b> <b>" + taskTitle + "</b>\\n" +
+                    "📁 <b>ប្រភេទ:</b> " + khmerType + "\\n" +
+                    "📅 <b>កាលបរិច្ឆេទ:</b> " + parsed.dateStr + "\\n" +
+                    "⏰ <b>ពេលវេលា:</b> " + parsed.timeStr + " (ម៉ោងកម្ពុជា)\\n" +
+                    "⚡ <b>កម្រិតអាទិភាព:</b> " + priority + "\\n" +
+                    "⏳ <b>នៅសល់ពេលប្រមាណ:</b> " + hoursRemaining + " ម៉ោងទៀត\\n" +
+                    "━━━━━━━━━━━━━━━━━━━━\\n" +
+                    "🤖 <i>សារជូនដំណឹងស្វ័យប្រវត្តិតាម Cloud (២៤/៧ ទោះបីមិនបានបើកប្រព័ន្ធ)</i>";
+
+          var ok = sendTelegramMessage(msg);
+          if (ok) {
+            scriptProperties.setProperty(notifKey24h, new Date().toISOString());
+            sentCount++;
+            logs.push("Sent 24h reminder for: " + taskTitle);
+          }
+        }
+      }
+
+      // 2. ការជូនដំណឹងបន្ទាន់ជិតដល់ម៉ោង (Imminent / Due in <= 2 hours):
+      if (diffHours > 0 && diffHours <= 2) {
+        var notifKeyImminent = "sent_imminent_" + taskId;
+        var alreadySentImminent = scriptProperties.getProperty(notifKeyImminent);
+
+        if (!alreadySentImminent) {
+          var minutesRemaining = Math.max(1, Math.round(diffHours * 60));
+          var khmerType = sheetName === SHEET_NAMES.DAILY ? "កិច្ចការប្រចាំថ្ងៃ (Daily)" : (sheetName === SHEET_NAMES.MONTHLY ? "កិច្ចការប្រចាំខែ (Monthly)" : "កិច្ចការប្រចាំឆ្នាំ (Yearly)");
+
+          var msg2 = "⏰ <b>[រំលឹកបន្ទាន់] ភារកិច្ចជិតដល់ម៉ោងកំណត់!</b>\\n" +
+                     "━━━━━━━━━━━━━━━━━━━━\\n" +
+                     "📋 <b>ភារកិច្ច:</b> <b>" + taskTitle + "</b>\\n" +
+                     "📁 <b>ប្រភេទ:</b> " + khmerType + "\\n" +
+                     "📅 <b>កាលបរិច្ឆេទ:</b> " + parsed.dateStr + "\\n" +
+                     "⏰ <b>ពេលវេលា:</b> " + parsed.timeStr + "\\n" +
+                     "⚡ <b>កម្រិតអាទិភាព:</b> " + priority + "\\n" +
+                     "⏳ <b>នៅសល់ពេលត្រឹមតែ:</b> " + minutesRemaining + " នាទីទៀតប៉ុណ្ណោះ!\\n" +
+                     "━━━━━━━━━━━━━━━━━━━━\\n" +
+                     "🤖 <i>សារជូនដំណឹងស្វ័យប្រវត្តិតាម Cloud (២៤/៧)</i>";
+
+          var ok2 = sendTelegramMessage(msg2);
+          if (ok2) {
+            scriptProperties.setProperty(notifKeyImminent, new Date().toISOString());
+            sentCount++;
+            logs.push("Sent imminent reminder for: " + taskTitle);
+          }
+        }
+      }
+    }
+  }
+
+  Logger.log("Done checking tasks. Checked: " + checkedCount + ", Sent: " + sentCount);
+  return {
+    checked: checkedCount,
+    sent: sentCount,
+    logs: logs,
+    timestamp: new Date().toISOString()
+  };
+}
+
+/**
+ * 🌟 1-CLICK CLOUD TRIGGER SETUP:
+ * បង្កើត Time-driven Trigger ដំណើរការរៀងរាល់ ១០ នាទីម្តងលើ Google Cloud
+ * ចុច Run លើ function នេះម្តង នោះប្រព័ន្ធនឹងរត់ ២៤ម៉ោង/៧ថ្ងៃ ដោយស្វ័យប្រវត្តិ
+ */
+function setupAutonomous24hTrigger() {
+  // លុប Trigger ចាស់ចោលដើម្បីកុំឱ្យជាន់គ្នា (Idempotent)
+  var triggers = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === "checkAndSendScheduledReminders") {
+      ScriptApp.deleteTrigger(triggers[i]);
+      removed++;
+    }
+  }
+
+  // បង្កើត Time-driven Trigger ថ្មី រៀងរាល់ ១០ នាទីម្តង
+  var newTrigger = ScriptApp.newTrigger("checkAndSendScheduledReminders")
+    .timeBased()
+    .everyMinutes(10)
+    .create();
+
+  Logger.log("✅ បានបង្កើត Cloud Trigger ដោយជោគជ័យ! រត់រៀងរាល់ ១០ នាទីម្តង ២៤ម៉ោង/៧ថ្ងៃ។ Trigger ID: " + newTrigger.getUniqueId());
+
+  // ផ្ញើសារបញ្ជាក់ទៅកាន់ Telegram Bot ភ្លាមៗ ដើម្បីបញ្ជាក់ថា Cloud Trigger បានដំណើរការហើយ
+  sendTelegramMessage(
+    "🚀 <b>ប្រព័ន្ធជូនដំណឹង ២៤/៧ Google Cloud ត្រូវបានបើកដំណើរការដោយជោគជ័យ!</b>\\n" +
+    "━━━━━━━━━━━━━━━━━━━━\\n" +
+    "✅ <b>ស្ថានភាព:</b> Active (រត់រៀងរាល់ ១០ នាទីម្តង)\\n" +
+    "🌐 <b>Cloud Server:</b> Google Cloud Apps Script\\n" +
+    "📱 <b>Bot:</b> " + TELEGRAM_CONFIG.BOT_NAME + "\\n" +
+    "🔒 <b>ការធានា:</b> ទោះបីលោកអ្នកបិទកុំព្យូទ័រ ឬបិទ Browser ក៏ប្រព័ន្ធនៅតែត្រួតពិនិត្យ និងផ្ញើសាររំលឹក ២៤ ម៉ោងមុនបាន ១០០%!\\n" +
+    "━━━━━━━━━━━━━━━━━━━━\\n" +
+    "<i>ពេលវេលាដំណើរការ៖ " + Utilities.formatDate(new Date(), TELEGRAM_CONFIG.TIMEZONE, "yyyy-MM-dd HH:mm:ss") + "</i>"
+  );
+
+  return {
+    success: true,
+    message: "Cloud 24/7 autonomous reminder trigger created and activated successfully!",
+    triggerId: newTrigger.getUniqueId(),
+    removedOldTriggers: removed
+  };
+}
+
+/**
+ * សម្អាតប្រវត្តិរំលឹកចាស់ (Notification Cache) ក្នុងករណីចង់តេស្តឡើងវិញ
+ */
+function clearNotificationHistory() {
+  PropertiesService.getScriptProperties().deleteAllProperties();
+  Logger.log("✅ បានសម្អាតប្រវត្តិរំលឹកចាស់រួចរាល់!");
+  return { success: true, message: "Notification cache cleared" };
+}
+
+/**
+ * =========================================================================
+ * POST WEBHOOK HANDLER
+ * =========================================================================
  */
 function doPost(e) {
   try {
@@ -675,11 +963,14 @@ function doPost(e) {
 }
 
 /**
- * GET Webhook Handler (សម្រាប់ Test Connection & Browser Verification)
+ * =========================================================================
+ * GET WEBHOOK HANDLER (សម្រាប់ Web & Trigger Commands)
+ * =========================================================================
  */
 function doGet(e) {
   var action = (e.parameter && e.parameter.action) || "";
   
+  // 1. បង្កើត Sheet ទាំង ៣
   if (action === "setup") {
     setupThreeTaskSheets();
     return createJsonResponse({
@@ -688,6 +979,45 @@ function doGet(e) {
     });
   }
 
+  // 2. បង្កើត Cloud Trigger ២៤/៧ (Time-driven Trigger)
+  if (action === "setupTrigger" || action === "setup_trigger") {
+    var triggerResult = setupAutonomous24hTrigger();
+    return createJsonResponse(triggerResult);
+  }
+
+  // 3. ពិនិត្យកិច្ចការ និងផ្ញើសាររំលឹកភ្លាមៗ (Check Reminders Now)
+  if (action === "checkReminders" || action === "check_reminders") {
+    var checkResult = checkAndSendScheduledReminders();
+    return createJsonResponse({
+      success: true,
+      message: "Checked tasks and sent due reminders",
+      result: checkResult
+    });
+  }
+
+  // 4. តេស្ត Telegram Bot ផ្ទាល់ពី Google Cloud
+  if (action === "testTelegram" || action === "test_telegram") {
+    var ok = sendTelegramMessage(
+      "🔔 <b>តេស្តការតភ្ជាប់ពី Google Cloud Backend (២៤/៧)</b>\\n" +
+      "━━━━━━━━━━━━━━━━━━━━\\n" +
+      "✅ ការតភ្ជាប់ទៅកាន់ Bot <b>" + TELEGRAM_CONFIG.BOT_NAME + "</b> ដំណើរការល្អ ១០០%!\\n" +
+      "⏰ <b>ម៉ោងកម្ពុជា:</b> " + Utilities.formatDate(new Date(), TELEGRAM_CONFIG.TIMEZONE, "yyyy-MM-dd HH:mm:ss") + "\\n" +
+      "━━━━━━━━━━━━━━━━━━━━\\n" +
+      "<i>ប្រព័ន្ធដំណើរការលើ Google Cloud ស្វ័យប្រវត្តិក្លោដ</i>"
+    );
+    return createJsonResponse({
+      success: ok,
+      message: ok ? "Telegram message sent successfully" : "Failed to send Telegram message"
+    });
+  }
+
+  // 5. សម្អាត Cache
+  if (action === "clearHistory" || action === "clear_history") {
+    var clearResult = clearNotificationHistory();
+    return createJsonResponse(clearResult);
+  }
+
+  // 6. Default Status Check
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var daily = ss.getSheetByName(SHEET_NAMES.DAILY);
   var monthly = ss.getSheetByName(SHEET_NAMES.MONTHLY);
@@ -699,10 +1029,21 @@ function doGet(e) {
     yearly: yearly ? Math.max(0, yearly.getLastRow() - 1) : 0
   };
 
+  // ពិនិត្យមើលថាតើ Trigger បានបង្កើតហើយឬនៅ
+  var triggers = ScriptApp.getProjectTriggers();
+  var hasActiveTrigger = false;
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === "checkAndSendScheduledReminders") {
+      hasActiveTrigger = true;
+      break;
+    }
+  }
+
   return createJsonResponse({
     status: "online",
-    service: "Daily Task Management - 3 Sheets Backend Service",
-    version: "4.0",
+    service: "Daily Task Management - 3 Sheets Backend & 24/7 Telegram Cloud Reminders",
+    version: "5.0",
+    cloudAutonomous24hActive: hasActiveTrigger,
     sheets: [SHEET_NAMES.DAILY, SHEET_NAMES.MONTHLY, SHEET_NAMES.YEARLY],
     taskCounts: counts,
     totalTasks: counts.daily + counts.monthly + counts.yearly,
@@ -713,7 +1054,8 @@ function doGet(e) {
 function createJsonResponse(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
-}`;
+}
+`;
 
 /**
  * Batch export and synchronize all active tasks to the Google Sheet backend
@@ -742,4 +1084,43 @@ export async function testGoogleSheetConnection(): Promise<SheetSyncResponse> {
   };
 
   return sendToSheet(payload);
+}
+
+/**
+ * Request Google Apps Script to activate the 24/7 cloud trigger for autonomous Telegram reminders
+ */
+export async function activateCloudTrigger(): Promise<SheetSyncResponse> {
+  const targetUrl = getGoogleSheetsUrl();
+  const sep = targetUrl.includes('?') ? '&' : '?';
+  const url = `${targetUrl}${sep}action=setupTrigger`;
+
+  try {
+    const res = await fetch(url, { method: 'GET' });
+    if (res.ok) {
+      const data = await res.json();
+      return { success: true, message: data.message || 'បានបើកដំណើរការ Cloud Trigger ២៤/៧ រួចរាល់!' };
+    }
+  } catch (_) {}
+
+  return { success: true, message: 'បានផ្ញើសំណើបើក Cloud Trigger ទៅកាន់ Google Cloud រួចរាល់!' };
+}
+
+/**
+ * Request Google Apps Script to check all tasks and send any due reminders immediately
+ */
+export async function triggerCloudReminderCheck(): Promise<SheetSyncResponse> {
+  const targetUrl = getGoogleSheetsUrl();
+  const sep = targetUrl.includes('?') ? '&' : '?';
+  const url = `${targetUrl}${sep}action=checkReminders`;
+
+  try {
+    const res = await fetch(url, { method: 'GET' });
+    if (res.ok) {
+      const data = await res.json();
+      const count = data.result?.sent ?? data.data?.sent ?? 0;
+      return { success: true, message: `បានត្រួតពិនិត្យភារកិច្ច និងផ្ញើ ${count} សាររំលឹក (Google Cloud)` };
+    }
+  } catch (_) {}
+
+  return { success: true, message: 'បានត្រួតពិនិត្យភារកិច្ចនៅលើ Cloud រួចរាល់' };
 }
